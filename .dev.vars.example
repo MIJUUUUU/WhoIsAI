@@ -1,0 +1,7 @@
+OPENAI_API_KEY=sk-your-key-here
+
+# 선택: 라운드 길이 오버라이드 (ms). 로컬 테스트 시 짧게 줄이면 편합니다.
+# DISCUSSION_MS=180000
+# VOTING_MS=30000
+# ROUND_RESULT_MS=6000
+# MAX_ROUNDS=5
