@@ -1,20 +1,20 @@
 import { DurableObject } from 'cloudflare:workers';
-import type {
-  Env,
-  RoomData,
-  Player,
-  ChatMessage,
-  ScheduledEvent,
-  RoomStateView,
-  ServerMessage,
-  ClientMessage,
+import {
+  MIN_PLAYERS_TO_START,
+  type Env,
+  type RoomData,
+  type Player,
+  type ChatMessage,
+  type ScheduledEvent,
+  type RoomStateView,
+  type ServerMessage,
+  type ClientMessage,
 } from './types';
 import { generateRandomNickname } from './names';
 import { findAiPlayer, generateAiMessage, randomMessageOffsets, shouldTriggerMentionReply } from './aiPlayer';
 import { verifyAppwriteJwt, recordGameResult, assignPersistentNickname, type AppwriteIdentity } from './appwrite';
 
-const MIN_PLAYERS_TO_START = 4;
-const MIN_MAX_PLAYERS = 4;
+const MIN_MAX_PLAYERS = MIN_PLAYERS_TO_START;
 const MAX_MAX_PLAYERS = 10;
 const DISCONNECT_GRACE_MS = 30000;
 const DISCUSSION_MS_DEFAULT = 3 * 60 * 1000;
@@ -287,10 +287,9 @@ export class GameRoomDO extends DurableObject<Env> {
       return this.sendError(ws, `최소 ${MIN_PLAYERS_TO_START}명이 모여야 시작할 수 있습니다.`);
     }
 
-    const takenNicknames = this.room.players.map((p) => p.nickname);
     const aiPlayer: Player = {
       id: crypto.randomUUID(),
-      nickname: generateRandomNickname(takenNicknames),
+      nickname: '', // 아래에서 전원과 함께 다시 배정됨
       isAI: true,
       isAlive: true,
       connected: true,
@@ -298,6 +297,19 @@ export class GameRoomDO extends DurableObject<Env> {
       lastMentionReplyAt: null,
     };
     this.room.players.push(aiPlayer);
+
+    // 대기실 닉네임(계정 고정 닉네임)과 완전히 별개로, 이번 게임 한정으로 "1번/2번/3번..." 같은
+    // 번호를 사람+AI 전원에게 동시에 배정한다. 단어 닉네임 대신 번호를 쓰면 대기실 닉네임과
+    // 겹칠 걱정 자체가 없다. 배열 순서(AI는 항상 맨 뒤에 push됨)를 그대로 쓰면 "마지막 번호 =
+    // AI"가 매 게임 반복되어 유추 가능해지므로, 번호를 매기기 전에 전체 순서를 섞는다.
+    for (let i = this.room.players.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [this.room.players[i], this.room.players[j]] = [this.room.players[j], this.room.players[i]];
+    }
+    this.room.players.forEach((p, idx) => {
+      p.nickname = `${idx + 1}번`;
+    });
+
     this.room.round = 1;
     await this.startDiscussionPhase();
     await this.syncLobby();
@@ -357,7 +369,8 @@ export class GameRoomDO extends DurableObject<Env> {
     }
 
     this.room.phase = 'ROUND_RESULT';
-    this.room.phaseEndsAt = null;
+    // null로 두면 이 phase에서 자가치유(checkOverdueTransitions)가 다음 단계로 못 넘어가므로 실제 시각을 넣는다.
+    this.room.phaseEndsAt = Date.now() + this.roundResultMs;
     await this.persist();
 
     this.broadcast({
@@ -395,6 +408,8 @@ export class GameRoomDO extends DurableObject<Env> {
 
   private async endGame(winner: 'HUMANS' | 'AI') {
     if (!this.room) return;
+    // 알람과 자가치유 체크가 겹칠 때 endGame이 중복 호출되는 걸 막는 안전장치.
+    if (this.room.phase === 'GAME_OVER') return;
     this.room.phase = 'GAME_OVER';
     this.room.phaseEndsAt = null;
     this.room.winner = winner;
@@ -415,14 +430,13 @@ export class GameRoomDO extends DurableObject<Env> {
   }
 
   // 로그인된 사람 플레이어만 전적을 남긴다 (AI는 계정이 없고, 게스트는 jwt가 없어서 자동으로 제외됨).
+  // 유저별로 순차 처리한다 (동시에 여러 명을 Promise.all로 쏘면 로컬 개발 환경에서 fetch 응답이 꼬이는 현상 확인됨).
   private async recordStats(winner: 'HUMANS' | 'AI') {
     if (!this.room) return;
     const loggedInPlayers = this.room.players.filter((p) => !p.isAI && p.appwriteUserId);
-    await Promise.all(
-      loggedInPlayers.map((p) =>
-        recordGameResult(this.env, p.appwriteUserId!, p.appwriteDisplayName || p.nickname, winner === 'HUMANS')
-      )
-    );
+    for (const p of loggedInPlayers) {
+      await recordGameResult(this.env, p.appwriteUserId!, p.appwriteDisplayName || p.nickname, winner === 'HUMANS');
+    }
   }
 
   private async emitAiMessage() {
@@ -533,6 +547,7 @@ export class GameRoomDO extends DurableObject<Env> {
     if (this.room.phaseEndsAt > Date.now()) return;
     if (this.room.phase === 'DISCUSSION') await this.startVotingPhase();
     else if (this.room.phase === 'VOTING') await this.tallyVotes();
+    else if (this.room.phase === 'ROUND_RESULT') await this.checkWinCondition();
   }
 
   private alivePlayers(): Player[] {

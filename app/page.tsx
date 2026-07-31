@@ -6,16 +6,20 @@ import Link from 'next/link';
 import { fetchLobby, joinRoom } from '@/lib/api';
 import { saveSession } from '@/lib/clientSession';
 import { useAuth } from '@/hooks/useAuth';
+import { useNicknameSetup } from '@/hooks/useNicknameSetup';
 import type { LobbyRoomSummary } from '@/types/game';
 import RoomList from '@/components/RoomList';
 import CreateRoomModal from '@/components/CreateRoomModal';
 import AuthStatus from '@/components/AuthStatus';
+import SetNicknameModal from '@/components/SetNicknameModal';
+import AlertModal from '@/components/AlertModal';
 
 const LOBBY_POLL_MS = 4000;
 
 export default function LobbyPage() {
   const router = useRouter();
-  const { user, loading: authLoading, login } = useAuth();
+  const { user, loading: authLoading, login, refresh } = useAuth();
+  const { needsNickname, nicknameSuggestion, handleSetNickname } = useNicknameSetup(user, authLoading, refresh);
   const [rooms, setRooms] = useState<LobbyRoomSummary[]>([]);
   const [showCreate, setShowCreate] = useState(false);
   const [codeInput, setCodeInput] = useState('');
@@ -112,14 +116,16 @@ export default function LobbyPage() {
           입장
         </button>
       </form>
-      {joinError && <p className="-mt-3 text-sm text-red-400">{joinError}</p>}
-
       <section>
         <h2 className="mb-3 text-sm font-semibold text-neutral-400">공개방 목록</h2>
         <RoomList rooms={rooms} onJoin={handleJoin} />
       </section>
 
       {showCreate && <CreateRoomModal onClose={() => setShowCreate(false)} />}
+      {needsNickname && (
+        <SetNicknameModal suggested={nicknameSuggestion} onSubmit={handleSetNickname} />
+      )}
+      {joinError && <AlertModal title={joinError} onClose={() => setJoinError(null)} />}
     </main>
   );
 }

@@ -12,6 +12,9 @@ export type {
   ClientMessage,
 } from '@/worker/types';
 
+// 값(런타임 상수) — 서버/클라 UI가 같은 값을 쓰도록 공유.
+export { MIN_PLAYERS_TO_START } from '@/worker/types';
+
 export interface AckResponse {
   ok: boolean;
   error?: string;

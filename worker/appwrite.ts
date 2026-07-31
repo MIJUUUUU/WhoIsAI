@@ -32,10 +32,16 @@ export async function verifyAppwriteJwt(env: Env, jwt: string): Promise<Appwrite
   }
 }
 
+async function logIfNotOk(label: string, res: Response) {
+  if (res.ok) return;
+  const body = await res.text().catch(() => '');
+  console.error(`[appwrite] ${label} 실패 (${res.status}): ${body.slice(0, 300)}`);
+}
+
 // 처음 로그인한 유저에게 배정된 닉네임을 계정에 영구 저장한다 (Users API, 서버 API 키 전용).
 export async function assignPersistentNickname(env: Env, userId: string, nickname: string): Promise<void> {
   try {
-    await fetch(`${env.APPWRITE_ENDPOINT}/users/${userId}/prefs`, {
+    const res = await fetch(`${env.APPWRITE_ENDPOINT}/users/${userId}/prefs`, {
       method: 'PATCH',
       headers: {
         'X-Appwrite-Project': env.APPWRITE_PROJECT_ID,
@@ -44,6 +50,7 @@ export async function assignPersistentNickname(env: Env, userId: string, nicknam
       },
       body: JSON.stringify({ prefs: { nickname } }),
     });
+    await logIfNotOk('닉네임 저장', res);
   } catch (err) {
     console.error('[appwrite] 닉네임 저장 실패:', (err as Error).message);
   }
@@ -69,8 +76,8 @@ export async function recordGameResult(env: Env, userId: string, displayName: st
   const headers = serverHeaders(env);
 
   try {
-    // row가 없으면 생성 (있으면 409 -> 무시)
-    await fetch(`${base}/rows`, {
+    // row가 없으면 생성 (있으면 409 conflict -> 정상, 무시)
+    const createRes = await fetch(`${base}/rows`, {
       method: 'POST',
       headers,
       body: JSON.stringify({
@@ -79,22 +86,28 @@ export async function recordGameResult(env: Env, userId: string, displayName: st
         permissions: ['read("any")'],
       }),
     });
+    if (!createRes.ok && createRes.status !== 409) await logIfNotOk('row 생성', createRes);
 
-    await fetch(`${base}/rows/${userId}/gamesPlayed/increment`, {
+    const gamesPlayedRes = await fetch(`${base}/rows/${userId}/gamesPlayed/increment`, {
       method: 'PATCH',
       headers,
       body: JSON.stringify({ value: 1 }),
     });
-    await fetch(`${base}/rows/${userId}/${won ? 'wins' : 'losses'}/increment`, {
+    await logIfNotOk('gamesPlayed 증가', gamesPlayedRes);
+
+    const outcomeRes = await fetch(`${base}/rows/${userId}/${won ? 'wins' : 'losses'}/increment`, {
       method: 'PATCH',
       headers,
       body: JSON.stringify({ value: 1 }),
     });
-    await fetch(`${base}/rows/${userId}`, {
+    await logIfNotOk(won ? 'wins 증가' : 'losses 증가', outcomeRes);
+
+    const updateRes = await fetch(`${base}/rows/${userId}`, {
       method: 'PATCH',
       headers,
       body: JSON.stringify({ data: { displayName, lastPlayedAt: new Date().toISOString() } }),
     });
+    await logIfNotOk('displayName/lastPlayedAt 갱신', updateRes);
   } catch (err) {
     console.error('[appwrite] 전적 기록 실패:', (err as Error).message);
   }
@@ -104,12 +117,19 @@ export async function fetchLeaderboard(env: Env, limit = 20): Promise<unknown[]>
   const base = statsBase(env);
   if (!base) return [];
   try {
-    const queries = [`orderDesc("wins")`, `limit(${limit})`];
-    const qs = queries.map((q) => `queries[]=${encodeURIComponent(q)}`).join('&');
+    // Appwrite 쿼리는 Query 빌더가 만드는 JSON 형태({"method":...})여야 한다 (사람이 읽는 함수-호출 문자열 아님).
+    const queries = [
+      { method: 'orderDesc', attribute: 'wins' },
+      { method: 'limit', values: [limit] },
+    ];
+    const qs = queries.map((q) => `queries[]=${encodeURIComponent(JSON.stringify(q))}`).join('&');
     const res = await fetch(`${base}/rows?${qs}`, {
       headers: { 'X-Appwrite-Project': env.APPWRITE_PROJECT_ID, 'X-Appwrite-Key': env.APPWRITE_API_KEY },
     });
-    if (!res.ok) return [];
+    if (!res.ok) {
+      await logIfNotOk('리더보드 조회', res);
+      return [];
+    }
     const data = (await res.json()) as { rows?: unknown[]; documents?: unknown[] };
     return data.rows ?? data.documents ?? [];
   } catch (err) {

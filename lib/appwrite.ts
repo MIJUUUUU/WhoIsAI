@@ -41,3 +41,8 @@ export async function getGameJwt(): Promise<string | null> {
     return null;
   }
 }
+
+// 대기실에서 보일 닉네임을 계정에 저장 (본인 계정이라 서버 없이 클라이언트에서 직접 가능).
+export async function setPersistentNickname(nickname: string): Promise<void> {
+  await account.updatePrefs({ prefs: { nickname } });
+}

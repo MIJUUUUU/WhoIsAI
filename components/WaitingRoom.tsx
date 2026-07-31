@@ -1,6 +1,6 @@
 'use client';
 
-import type { RoomState } from '@/types/game';
+import { MIN_PLAYERS_TO_START, type RoomState } from '@/types/game';
 
 export default function WaitingRoom({
   room,
@@ -15,7 +15,7 @@ export default function WaitingRoom({
 }) {
   const isHost = room.hostId === viewerId;
   const humanCount = room.players.length;
-  const canStart = humanCount >= 4;
+  const canStart = humanCount >= MIN_PLAYERS_TO_START;
 
   function copyInvite() {
     const url = `${window.location.origin}/room/${room.id}`;
@@ -64,7 +64,7 @@ export default function WaitingRoom({
           disabled={!canStart}
           className="w-full rounded-xl bg-emerald-600 py-3 font-semibold hover:bg-emerald-500 disabled:opacity-40"
         >
-          {canStart ? '게임 시작' : `최소 4명 필요 (${humanCount}/4)`}
+          {canStart ? '게임 시작' : `최소 ${MIN_PLAYERS_TO_START}명 필요 (${humanCount}/${MIN_PLAYERS_TO_START})`}
         </button>
       ) : (
         <p className="text-center text-sm text-neutral-500">

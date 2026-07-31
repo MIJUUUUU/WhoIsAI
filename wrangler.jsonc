@@ -13,8 +13,8 @@
     "APPWRITE_ENDPOINT": "https://fra.cloud.appwrite.io/v1",
     "APPWRITE_PROJECT_ID": "6a6bf96d001d30e4ea36",
     // APPWRITE_API_KEY는 secret으로 별도 등록 (wrangler secret put)
-    "APPWRITE_DATABASE_ID": "game",
-    "APPWRITE_STATS_TABLE_ID": "6a6c1ec1002652651e23"
+    "APPWRITE_DATABASE_ID": "6a6c1ec1002652651e23",
+    "APPWRITE_STATS_TABLE_ID": "game"
   },
   "durable_objects": {
     "bindings": [

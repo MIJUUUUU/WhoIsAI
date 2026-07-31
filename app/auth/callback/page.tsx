@@ -17,7 +17,7 @@ function CallbackHandler() {
     if (params.get('error') || !userId || !secret) {
       // URL 쿼리(외부 리다이렉트 결과)를 반영하는 것이므로 effect 내 setState가 맞다.
       // eslint-disable-next-line react-hooks/set-state-in-effect
-      setError('로그인에 실패했습니다.');
+      setError(`로그인에 실패했습니다. 쿼리: ${params.toString() || '(비어있음)'}`);
       return;
     }
 
@@ -28,7 +28,7 @@ function CallbackHandler() {
     account
       .createSession({ userId, secret })
       .then(() => router.replace(destination))
-      .catch(() => setError('로그인에 실패했습니다.'));
+      .catch((err) => setError(`로그인에 실패했습니다: ${err?.message || err}`));
   }, [params, router]);
 
   if (error) {

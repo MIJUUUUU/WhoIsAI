@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useGameSocket } from '@/hooks/useGameSocket';
 import { useAuth } from '@/hooks/useAuth';
+import { useNicknameSetup } from '@/hooks/useNicknameSetup';
 import { joinRoom } from '@/lib/api';
 import { loadSession, saveSession, clearSession } from '@/lib/clientSession';
 import type { GameOverPayload, RoomState, RoundResultPayload, VoteProgressPayload } from '@/types/game';
@@ -14,14 +15,20 @@ import VotePanel from '@/components/VotePanel';
 import RoundTimer from '@/components/RoundTimer';
 import RoundResultModal from '@/components/RoundResultModal';
 import GameOverModal from '@/components/GameOverModal';
+import NicknameInfoModal from '@/components/NicknameInfoModal';
+import ConfirmModal from '@/components/ConfirmModal';
+import SetNicknameModal from '@/components/SetNicknameModal';
+import ToastStack, { type ToastItem } from '@/components/ToastStack';
 
 type JoinPhase = 'checking' | 'notJoined' | 'joined';
+const TOAST_DURATION_MS = 4000;
 
 export default function RoomPage() {
   const params = useParams<{ roomId: string }>();
   const roomId = String(params.roomId).toUpperCase();
   const router = useRouter();
-  const { user, loading: authLoading, login } = useAuth();
+  const { user, loading: authLoading, login, refresh } = useAuth();
+  const { needsNickname, nicknameSuggestion, handleSetNickname } = useNicknameSetup(user, authLoading, refresh);
 
   const [joinPhase, setJoinPhase] = useState<JoinPhase>('checking');
   const [joinError, setJoinError] = useState<string | null>(null);
@@ -34,7 +41,19 @@ export default function RoomPage() {
   const [hasVoted, setHasVoted] = useState(false);
   const [roundResult, setRoundResult] = useState<RoundResultPayload | null>(null);
   const [gameOver, setGameOver] = useState<GameOverPayload | null>(null);
+  const [showNicknameInfo, setShowNicknameInfo] = useState(false);
+  const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
   const receivedStateRef = useRef(false);
+  const roomRef = useRef<RoomState | null>(null);
+
+  function pushToast(message: string) {
+    const id = crypto.randomUUID();
+    setToasts((prev) => [...prev, { id, message }]);
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, TOAST_DURATION_MS);
+  }
 
   useEffect(() => {
     // localStorage(외부 시스템) 조회 결과를 반영하는 것이므로 effect 내 setState가 맞다.
@@ -51,6 +70,25 @@ export default function RoomPage() {
   const { sendMessage } = useGameSocket(joinPhase === 'joined' ? roomId : null, playerId, {
     'room:state': (payload) => {
       receivedStateRef.current = true;
+      const prev = roomRef.current;
+      if (prev) {
+        // 대기실 단계에서만 알림(게임 시작 시 AI가 조용히 추가되는 걸 "입장"으로 오해하지 않도록).
+        if (payload.phase === 'LOBBY') {
+          const prevIds = new Set(prev.players.map((p) => p.id));
+          payload.players
+            .filter((p) => !prevIds.has(p.id))
+            .forEach((p) => pushToast(`${p.nickname}님이 입장했어요`));
+        }
+        const nextIds = new Set(payload.players.map((p) => p.id));
+        prev.players
+          .filter((p) => !nextIds.has(p.id))
+          .forEach((p) => pushToast(`${p.nickname}님이 나갔어요`));
+        // 대기실 -> 토론으로 넘어가는 순간(=닉네임이 실제로 재배정되는 순간)에만 안내를 띄운다.
+        if (prev.phase === 'LOBBY' && payload.phase !== 'LOBBY') {
+          setShowNicknameInfo(true);
+        }
+      }
+      roomRef.current = payload;
       setRoom(payload);
     },
     'chat:new': (payload) => {
@@ -113,6 +151,10 @@ export default function RoomPage() {
     router.push('/');
   }
 
+  function requestLeave() {
+    setShowLeaveConfirm(true);
+  }
+
   if (joinPhase === 'checking') {
     return <CenteredMessage text="입장 확인 중..." />;
   }
@@ -162,7 +204,7 @@ export default function RoomPage() {
             <RoundTimer endsAt={room.phaseEndsAt} />
           )}
           <button
-            onClick={handleLeave}
+            onClick={requestLeave}
             className="rounded-lg bg-neutral-800 px-3 py-1.5 text-sm hover:bg-neutral-700"
           >
             나가기
@@ -200,6 +242,25 @@ export default function RoomPage() {
       {room.phase === 'GAME_OVER' && gameOver && (
         <GameOverModal payload={gameOver} onLeave={handleLeave} />
       )}
+      {showNicknameInfo && self && (
+        <NicknameInfoModal
+          realName={user?.name}
+          nickname={self.nickname}
+          onClose={() => setShowNicknameInfo(false)}
+        />
+      )}
+      {showLeaveConfirm && (
+        <ConfirmModal
+          title="정말 방을 나가시겠어요?"
+          confirmLabel="나가기"
+          onConfirm={handleLeave}
+          onCancel={() => setShowLeaveConfirm(false)}
+        />
+      )}
+      {needsNickname && (
+        <SetNicknameModal suggested={nicknameSuggestion} onSubmit={handleSetNickname} />
+      )}
+      <ToastStack toasts={toasts} />
     </main>
   );
 }
