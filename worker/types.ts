@@ -8,6 +8,11 @@ export interface Env {
   VOTING_MS?: string;
   ROUND_RESULT_MS?: string;
   MAX_ROUNDS?: string;
+  APPWRITE_ENDPOINT: string;
+  APPWRITE_PROJECT_ID: string;
+  APPWRITE_DATABASE_ID: string;
+  APPWRITE_STATS_TABLE_ID: string;
+  APPWRITE_API_KEY: string;
 }
 
 export type GamePhase = 'LOBBY' | 'DISCUSSION' | 'VOTING' | 'ROUND_RESULT' | 'GAME_OVER';
@@ -20,6 +25,9 @@ export interface Player {
   connected: boolean;
   disconnectedAt: number | null;
   lastMentionReplyAt: number | null;
+  // 로그인된 경우에만 채워짐. 다른 플레이어에게는 절대 노출하지 않고 전적 기록에만 쓴다.
+  appwriteUserId?: string;
+  appwriteDisplayName?: string;
 }
 
 export interface ChatMessage {

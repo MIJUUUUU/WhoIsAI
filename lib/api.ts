@@ -1,3 +1,4 @@
+import { getGameJwt } from '@/lib/appwrite';
 import type { AckResponse, LobbyRoomSummary } from '@/types/game';
 
 async function postJson(url: string, body: unknown): Promise<AckResponse> {
@@ -13,16 +14,20 @@ async function postJson(url: string, body: unknown): Promise<AckResponse> {
   }
 }
 
-export function createRoom(input: {
+export async function createRoom(input: {
   name: string;
   isPublic: boolean;
   maxPlayers: number;
 }): Promise<AckResponse> {
-  return postJson('/api/rooms', input);
+  const jwt = await getGameJwt();
+  if (!jwt) return { ok: false, error: '로그인 후 이용할 수 있습니다.' };
+  return postJson('/api/rooms', { ...input, jwt });
 }
 
-export function joinRoom(roomId: string): Promise<AckResponse> {
-  return postJson(`/api/rooms/${roomId}/join`, {});
+export async function joinRoom(roomId: string): Promise<AckResponse> {
+  const jwt = await getGameJwt();
+  if (!jwt) return { ok: false, error: '로그인 후 이용할 수 있습니다.' };
+  return postJson(`/api/rooms/${roomId}/join`, { jwt });
 }
 
 export async function fetchLobby(): Promise<LobbyRoomSummary[]> {

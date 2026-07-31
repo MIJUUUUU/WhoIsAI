@@ -2,16 +2,20 @@
 
 import { useEffect, useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { fetchLobby, joinRoom } from '@/lib/api';
 import { saveSession } from '@/lib/clientSession';
+import { useAuth } from '@/hooks/useAuth';
 import type { LobbyRoomSummary } from '@/types/game';
 import RoomList from '@/components/RoomList';
 import CreateRoomModal from '@/components/CreateRoomModal';
+import AuthStatus from '@/components/AuthStatus';
 
 const LOBBY_POLL_MS = 4000;
 
 export default function LobbyPage() {
   const router = useRouter();
+  const { user, loading: authLoading, login } = useAuth();
   const [rooms, setRooms] = useState<LobbyRoomSummary[]>([]);
   const [showCreate, setShowCreate] = useState(false);
   const [codeInput, setCodeInput] = useState('');
@@ -33,6 +37,10 @@ export default function LobbyPage() {
   }, []);
 
   async function handleJoin(roomId: string) {
+    if (!user) {
+      login(`/room/${roomId}`);
+      return;
+    }
     setJoining(true);
     setJoinError(null);
     const res = await joinRoom(roomId);
@@ -51,8 +59,23 @@ export default function LobbyPage() {
     if (code.length >= 4) handleJoin(code);
   }
 
+  function handleCreateClick() {
+    if (!user) {
+      login();
+      return;
+    }
+    setShowCreate(true);
+  }
+
   return (
     <main className="mx-auto flex w-full max-w-lg flex-1 flex-col gap-6 px-4 py-10">
+      <div className="flex items-center justify-between">
+        <Link href="/leaderboard" className="text-sm text-neutral-400 hover:underline">
+          리더보드
+        </Link>
+        <AuthStatus />
+      </div>
+
       <header className="text-center">
         <h1 className="text-2xl font-bold">누가 AI일까?</h1>
         <p className="mt-1 text-sm text-neutral-400">
@@ -60,8 +83,14 @@ export default function LobbyPage() {
         </p>
       </header>
 
+      {!authLoading && !user && (
+        <p className="text-center text-xs text-neutral-500">
+          방을 만들거나 입장하려면 로그인이 필요해요.
+        </p>
+      )}
+
       <button
-        onClick={() => setShowCreate(true)}
+        onClick={handleCreateClick}
         className="w-full rounded-xl bg-emerald-600 py-3 font-semibold hover:bg-emerald-500"
       >
         + 새 방 만들기

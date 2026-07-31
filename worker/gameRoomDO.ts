@@ -11,6 +11,7 @@ import type {
 } from './types';
 import { generateRandomNickname } from './names';
 import { findAiPlayer, generateAiMessage, randomMessageOffsets, shouldTriggerMentionReply } from './aiPlayer';
+import { verifyAppwriteJwt, recordGameResult, assignPersistentNickname, type AppwriteIdentity } from './appwrite';
 
 const MIN_PLAYERS_TO_START = 4;
 const MIN_MAX_PLAYERS = 4;
@@ -49,14 +50,17 @@ export class GameRoomDO extends DurableObject<Env> {
 
   // ---------------- RPC (HTTP 라우트에서 호출) ----------------
 
-  async createRoom(input: { roomId: string; name: string; isPublic: boolean; maxPlayers: number }) {
+  async createRoom(input: { roomId: string; name: string; isPublic: boolean; maxPlayers: number; jwt?: string }) {
     await this.loaded;
+    const identity = input.jwt ? await verifyAppwriteJwt(this.env, input.jwt) : null;
+    if (!identity) return { error: '로그인 후 이용할 수 있습니다.' };
+
     const clampedMax = Math.min(
       MAX_MAX_PLAYERS,
       Math.max(MIN_MAX_PLAYERS, Number(input.maxPlayers) || MIN_MAX_PLAYERS)
     );
     const hostId = crypto.randomUUID();
-    const nickname = generateRandomNickname([]);
+    const nickname = await this.resolveNickname(identity, []);
     const hostPlayer: Player = {
       id: hostId,
       nickname,
@@ -65,6 +69,8 @@ export class GameRoomDO extends DurableObject<Env> {
       connected: false,
       disconnectedAt: null,
       lastMentionReplyAt: null,
+      appwriteUserId: identity?.id,
+      appwriteDisplayName: identity?.name,
     };
 
     this.room = {
@@ -89,16 +95,22 @@ export class GameRoomDO extends DurableObject<Env> {
     return { playerId: hostId, nickname, room: this.serializeRoom() };
   }
 
-  async joinRoom() {
+  async joinRoom(input: { jwt?: string } = {}) {
     await this.loaded;
     if (!this.room) return { error: '존재하지 않는 방입니다.' };
     if (this.room.phase !== 'LOBBY') return { error: '이미 게임이 시작된 방입니다.' };
+
+    const identity = input.jwt ? await verifyAppwriteJwt(this.env, input.jwt) : null;
+    if (!identity) return { error: '로그인 후 이용할 수 있습니다.' };
 
     const humanCount = this.room.players.filter((p) => !p.isAI).length;
     if (humanCount >= this.room.maxPlayers) return { error: '방 인원이 가득 찼습니다.' };
 
     const playerId = crypto.randomUUID();
-    const nickname = generateRandomNickname(this.room.players.map((p) => p.nickname));
+    const nickname = await this.resolveNickname(
+      identity,
+      this.room.players.map((p) => p.nickname)
+    );
     this.room.players.push({
       id: playerId,
       nickname,
@@ -107,11 +119,26 @@ export class GameRoomDO extends DurableObject<Env> {
       connected: false,
       disconnectedAt: null,
       lastMentionReplyAt: null,
+      appwriteUserId: identity?.id,
+      appwriteDisplayName: identity?.name,
     });
     await this.persist();
     await this.syncLobby();
     this.broadcastState();
     return { playerId, nickname, room: this.serializeRoom() };
+  }
+
+  // 로그인된 유저는 계정에 고정된 닉네임을 재사용한다 (처음이면 새로 배정해서 계정에 저장).
+  // 이 방 안에서 이미 쓰이고 있는 이름과 겹치면(드문 경우) 이번 판에 한해서만 새로 뽑는다.
+  private async resolveNickname(identity: AppwriteIdentity | null, taken: string[]): Promise<string> {
+    if (!identity) return generateRandomNickname(taken);
+    if (identity.nickname && !taken.includes(identity.nickname)) return identity.nickname;
+
+    const fresh = generateRandomNickname(taken);
+    if (!identity.nickname) {
+      await assignPersistentNickname(this.env, identity.id, fresh);
+    }
+    return fresh;
   }
 
   // ---------------- WebSocket ----------------
@@ -384,6 +411,18 @@ export class GameRoomDO extends DurableObject<Env> {
     });
     this.broadcastState();
     await this.syncLobby();
+    await this.recordStats(winner);
+  }
+
+  // 로그인된 사람 플레이어만 전적을 남긴다 (AI는 계정이 없고, 게스트는 jwt가 없어서 자동으로 제외됨).
+  private async recordStats(winner: 'HUMANS' | 'AI') {
+    if (!this.room) return;
+    const loggedInPlayers = this.room.players.filter((p) => !p.isAI && p.appwriteUserId);
+    await Promise.all(
+      loggedInPlayers.map((p) =>
+        recordGameResult(this.env, p.appwriteUserId!, p.appwriteDisplayName || p.nickname, winner === 'HUMANS')
+      )
+    );
   }
 
   private async emitAiMessage() {

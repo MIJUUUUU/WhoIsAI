@@ -5,3 +5,8 @@ OPENAI_API_KEY=sk-your-key-here
 # VOTING_MS=30000
 # ROUND_RESULT_MS=6000
 # MAX_ROUNDS=5
+
+# Appwrite: Database + player_stats 테이블, API 키 (Settings > API Keys, databases 읽기/쓰기 스코프)
+APPWRITE_DATABASE_ID=your-database-id
+APPWRITE_STATS_TABLE_ID=your-table-id
+APPWRITE_API_KEY=your-appwrite-api-key

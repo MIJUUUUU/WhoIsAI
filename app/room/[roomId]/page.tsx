@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useGameSocket } from '@/hooks/useGameSocket';
+import { useAuth } from '@/hooks/useAuth';
 import { joinRoom } from '@/lib/api';
 import { loadSession, saveSession, clearSession } from '@/lib/clientSession';
 import type { GameOverPayload, RoomState, RoundResultPayload, VoteProgressPayload } from '@/types/game';
@@ -20,6 +21,7 @@ export default function RoomPage() {
   const params = useParams<{ roomId: string }>();
   const roomId = String(params.roomId).toUpperCase();
   const router = useRouter();
+  const { user, loading: authLoading, login } = useAuth();
 
   const [joinPhase, setJoinPhase] = useState<JoinPhase>('checking');
   const [joinError, setJoinError] = useState<string | null>(null);
@@ -75,6 +77,10 @@ export default function RoomPage() {
   });
 
   async function handleJoin() {
+    if (!user) {
+      login(`/room/${roomId}`);
+      return;
+    }
     setJoining(true);
     setJoinError(null);
     const res = await joinRoom(roomId);
@@ -119,6 +125,9 @@ export default function RoomPage() {
         <p className="text-center text-xs text-neutral-600">
           입장하면 닉네임이 자동으로 배정돼요.
         </p>
+        {!authLoading && !user && (
+          <p className="text-center text-xs text-neutral-500">입장하려면 로그인이 필요해요.</p>
+        )}
         {joinError && <p className="text-center text-sm text-red-400">{joinError}</p>}
         <button
           onClick={handleJoin}

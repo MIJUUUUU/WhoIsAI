@@ -3,6 +3,7 @@ import { default as nextHandler } from '../.open-next/worker.js';
 import type { Env } from './types';
 import { GameRoomDO } from './gameRoomDO';
 import { LobbyRegistryDO } from './lobbyRegistryDO';
+import { fetchLeaderboard } from './appwrite';
 
 export { GameRoomDO, LobbyRegistryDO };
 
@@ -53,14 +54,23 @@ export default {
       return json(rooms);
     }
 
+    if (pathname === '/api/leaderboard' && request.method === 'GET') {
+      const rows = await fetchLeaderboard(env);
+      return json(rows);
+    }
+
     if (pathname === '/api/rooms' && request.method === 'POST') {
       const body = await readJson(request);
+      if (!body.jwt || typeof body.jwt !== 'string') {
+        return json({ ok: false, error: '로그인 후 이용할 수 있습니다.' }, 401);
+      }
       const roomId = generateRoomCode();
       const result = await gameRoomStub(env, roomId).createRoom({
         roomId,
         name: body.name,
         isPublic: body.isPublic,
         maxPlayers: body.maxPlayers,
+        jwt: body.jwt,
       });
       if (result?.error) return json({ ok: false, error: result.error }, 400);
       return json({ ok: true, roomId, playerId: result.playerId, nickname: result.nickname });
@@ -69,7 +79,11 @@ export default {
     const joinMatch = pathname.match(/^\/api\/rooms\/([^/]+)\/join$/);
     if (joinMatch && request.method === 'POST') {
       const roomId = joinMatch[1].toUpperCase();
-      const result = await gameRoomStub(env, roomId).joinRoom();
+      const body = await readJson(request);
+      if (!body.jwt || typeof body.jwt !== 'string') {
+        return json({ ok: false, error: '로그인 후 이용할 수 있습니다.' }, 401);
+      }
+      const result = await gameRoomStub(env, roomId).joinRoom({ jwt: body.jwt });
       if (result?.error) return json({ ok: false, error: result.error }, 400);
       return json({ ok: true, roomId, playerId: result.playerId, nickname: result.nickname });
     }
