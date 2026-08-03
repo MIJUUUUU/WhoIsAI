@@ -11,9 +11,18 @@ import {
   type ClientMessage,
 } from './types';
 import { generateRandomNickname } from './names';
-import { findAiPlayer, generateAiMessage, randomMessageOffsets, shouldTriggerMentionReply } from './aiPlayer';
+import {
+  findAiPlayer,
+  generateAiMessage,
+  randomMessageOffsets,
+  shouldTriggerMentionReply,
+  shouldTriggerReactiveReply,
+  pickAiPersona,
+  type ReactingTo,
+} from './aiPlayer';
 import { verifyAppwriteJwt, recordGameResult, assignPersistentNickname, type AppwriteIdentity } from './appwrite';
 import { pickRandomTopic } from './topics';
+import { censorProfanity } from './profanity';
 
 const MIN_MAX_PLAYERS = MIN_PLAYERS_TO_START;
 const MAX_MAX_PLAYERS = 10;
@@ -22,6 +31,13 @@ const DISCUSSION_MS_DEFAULT = 3 * 60 * 1000;
 const VOTING_MS_DEFAULT = 30 * 1000;
 const ROUND_RESULT_MS_DEFAULT = 6 * 1000;
 const MAX_ROUNDS_DEFAULT = 5;
+const CHAT_SPAM_WINDOW_MS = 10 * 1000;
+const CHAT_SPAM_LIMIT = 10;
+const CHAT_MUTE_MS = 30 * 1000;
+const PROFANITY_KICK_LIMIT = 3;
+// 클라이언트 ping 주기(15초)보다 넉넉히 커야 정상 연결을 오탐하지 않는다.
+// 백그라운드 탭은 브라우저가 타이머를 강하게 스로틀링해서 40초 정도로는 오탐이 났었어서 더 넉넉하게 잡는다.
+const STALE_CONNECTION_MS = 90 * 1000;
 
 export class GameRoomDO extends DurableObject<Env> {
   room: RoomData | null = null;
@@ -65,11 +81,14 @@ export class GameRoomDO extends DurableObject<Env> {
     const hostPlayer: Player = {
       id: hostId,
       nickname,
+      lobbyNickname: nickname,
       isAI: false,
       isAlive: true,
       connected: false,
       disconnectedAt: null,
-      lastMentionReplyAt: null,
+      lastSeenAt: null,
+      lastReactiveReplyAt: null,
+      isReady: false,
       appwriteUserId: identity?.id,
       appwriteDisplayName: identity?.name,
     };
@@ -90,6 +109,8 @@ export class GameRoomDO extends DurableObject<Env> {
       revealed: [],
       createdAt: Date.now(),
       topic: null,
+      aiPersona: null,
+      kickedUserIds: [],
     };
     this.events = [];
     await this.persist();
@@ -104,6 +125,9 @@ export class GameRoomDO extends DurableObject<Env> {
 
     const identity = input.jwt ? await verifyAppwriteJwt(this.env, input.jwt) : null;
     if (!identity) return { error: '로그인 후 이용할 수 있습니다.' };
+    if (this.room.kickedUserIds.includes(identity.id)) {
+      return { error: '강퇴당한 방에는 다시 입장할 수 없습니다.' };
+    }
 
     const humanCount = this.room.players.filter((p) => !p.isAI).length;
     if (humanCount >= this.room.maxPlayers) return { error: '방 인원이 가득 찼습니다.' };
@@ -116,11 +140,14 @@ export class GameRoomDO extends DurableObject<Env> {
     this.room.players.push({
       id: playerId,
       nickname,
+      lobbyNickname: nickname,
       isAI: false,
       isAlive: true,
       connected: false,
       disconnectedAt: null,
-      lastMentionReplyAt: null,
+      lastSeenAt: null,
+      lastReactiveReplyAt: null,
+      isReady: false,
       appwriteUserId: identity?.id,
       appwriteDisplayName: identity?.name,
     });
@@ -162,6 +189,8 @@ export class GameRoomDO extends DurableObject<Env> {
     await this.loaded;
     if (!this.room) return;
     await this.checkOverdueTransitions();
+    await this.checkStaleConnections();
+    if (!this.room) return;
 
     let msg: ClientMessage;
     try {
@@ -180,6 +209,7 @@ export class GameRoomDO extends DurableObject<Env> {
       ws.serializeAttachment({ playerId: player.id });
       player.connected = true;
       player.disconnectedAt = null;
+      player.lastSeenAt = Date.now();
       this.cancelEventsFor('DISCONNECT_GRACE', player.id);
       await this.persist();
       this.broadcastState();
@@ -191,6 +221,8 @@ export class GameRoomDO extends DurableObject<Env> {
     if (!playerId) return;
     const player = this.room.players.find((p) => p.id === playerId);
     if (!player) return;
+    // ping을 포함해 뭐든 메시지가 온다는 건 소켓이 살아있다는 뜻이므로 매번 갱신한다.
+    player.lastSeenAt = Date.now();
 
     if (msg.type === 'chat:send') {
       await this.handleChatSend(ws, player, msg.text);
@@ -198,6 +230,10 @@ export class GameRoomDO extends DurableObject<Env> {
       await this.handleVoteCast(ws, player, msg.targetId);
     } else if (msg.type === 'game:start') {
       await this.handleGameStart(ws, player);
+    } else if (msg.type === 'player:ready') {
+      await this.handlePlayerReady(player, msg.ready);
+    } else if (msg.type === 'player:kick') {
+      await this.handlePlayerKick(ws, player, msg.targetId);
     }
   }
 
@@ -207,8 +243,15 @@ export class GameRoomDO extends DurableObject<Env> {
     const attachment = ws.deserializeAttachment() as { playerId?: string } | null;
     const playerId = attachment?.playerId;
     if (!playerId) return;
+    await this.markDisconnected(playerId);
+  }
+
+  // 정상적인 close 신호(webSocketClose)로 감지된 경우와, ping이 STALE_CONNECTION_MS 넘게 끊긴
+  // 것으로 감지된 경우 둘 다 여기로 모아서 처리한다 (대기실 즉시 퇴장 / 게임 중 유예 후 퇴장).
+  private async markDisconnected(playerId: string) {
+    if (!this.room) return;
     const player = this.room.players.find((p) => p.id === playerId);
-    if (!player) return;
+    if (!player || !player.connected) return;
 
     player.connected = false;
     player.disconnectedAt = Date.now();
@@ -216,7 +259,11 @@ export class GameRoomDO extends DurableObject<Env> {
     this.broadcastState();
 
     if (this.room.phase === 'LOBBY') {
-      await this.removePlayer(playerId);
+      // 대기실에서 혼자 있는 상태로 끊기면(백그라운드 탭 스로틀링, 일시적 네트워크 문제 등) 방을
+      // 통째로 없애지 않는다 — 금방 재접속해서 돌아올 수도 있고, 어차피 다른 사람이 없어서
+      // 유령 상태로 남아있어도 헷갈릴 사람이 없다. 정말 안 돌아오면 그냥 방치될 뿐 피해가 없다.
+      const humanCount = this.room.players.filter((p) => !p.isAI).length;
+      if (humanCount > 1) await this.removePlayer(playerId);
     } else {
       await this.enqueueEvent({
         id: crypto.randomUUID(),
@@ -224,6 +271,21 @@ export class GameRoomDO extends DurableObject<Env> {
         dueAt: Date.now() + DISCONNECT_GRACE_MS,
         payload: { playerId },
       });
+    }
+  }
+
+  // 소켓이 정상 종료 신호 없이 조용히 죽어서(노트북 잠자기 등) webSocketClose가 안 불릴 수 있으므로,
+  // 클라이언트가 15초마다 보내는 ping을 기준으로 STALE_CONNECTION_MS 넘게 아무 신호도 없었으면
+  // 끊긴 것으로 간주한다.
+  private async checkStaleConnections() {
+    if (!this.room) return;
+    const now = Date.now();
+    const stale = this.room.players.filter(
+      (p) => !p.isAI && p.connected && p.lastSeenAt !== null && now - p.lastSeenAt > STALE_CONNECTION_MS
+    );
+    for (const p of stale) {
+      if (!this.room) break;
+      await this.markDisconnected(p.id);
     }
   }
 
@@ -236,14 +298,36 @@ export class GameRoomDO extends DurableObject<Env> {
     }
     if (!player.isAlive) return this.sendError(ws, '탈락한 플레이어는 채팅할 수 없습니다.');
 
+    const now = Date.now();
+    if (player.mutedUntil && now < player.mutedUntil) {
+      return this.sendChatMuted(ws, player.mutedUntil);
+    }
+
+    // 도배 방지: 최근 CHAT_SPAM_WINDOW_MS 안에 CHAT_SPAM_LIMIT개를 이미 보냈다면 CHAT_MUTE_MS만큼 잠근다.
+    player.recentChatTimestamps = (player.recentChatTimestamps ?? []).filter(
+      (t) => now - t < CHAT_SPAM_WINDOW_MS
+    );
+    if (player.recentChatTimestamps.length >= CHAT_SPAM_LIMIT) {
+      player.mutedUntil = now + CHAT_MUTE_MS;
+      player.recentChatTimestamps = [];
+      await this.persist();
+      return this.sendChatMuted(ws, player.mutedUntil);
+    }
+    player.recentChatTimestamps.push(now);
+
     const text = String(rawText || '').trim().slice(0, 300);
     if (!text) return this.sendError(ws, '메시지를 입력해주세요.');
+
+    const { censored, matched } = censorProfanity(text);
+    if (matched) {
+      player.profanityStrikes = (player.profanityStrikes ?? 0) + 1;
+    }
 
     const message: ChatMessage = {
       id: crypto.randomUUID(),
       playerId: player.id,
       nickname: player.nickname,
-      text,
+      text: censored,
       ts: Date.now(),
     };
     this.room.chatLog.push(message);
@@ -251,12 +335,35 @@ export class GameRoomDO extends DurableObject<Env> {
     await this.persist();
     this.broadcast({ type: 'chat:new', payload: message });
 
-    if (this.room.phase === 'DISCUSSION' && shouldTriggerMentionReply(this.room, message, Date.now())) {
+    if (matched && (player.profanityStrikes ?? 0) >= PROFANITY_KICK_LIMIT) {
+      await this.kickPlayer(player.id, '비속어를 반복 사용해 강제 퇴장되었습니다.');
+      return;
+    }
+    if (matched) {
+      try {
+        ws.send(
+          JSON.stringify({
+            type: 'chat:warning',
+            payload: { count: player.profanityStrikes ?? 1, limit: PROFANITY_KICK_LIMIT },
+          } satisfies ServerMessage)
+        );
+      } catch {
+        // 이미 끊긴 소켓은 무시
+      }
+    }
+
+    if (this.room.phase === 'DISCUSSION') {
       const ai = findAiPlayer(this.room);
       if (ai) {
-        ai.lastMentionReplyAt = Date.now();
-        const delay = 2000 + Math.random() * 3000;
-        await this.enqueueEvent({ id: crypto.randomUUID(), type: 'AI_MENTION_REPLY', dueAt: Date.now() + delay });
+        const now = Date.now();
+        const mentioned = shouldTriggerMentionReply(this.room, message, now);
+        // 직접 언급된 게 아니라면, 확률적으로 대화에 자연스럽게 끼어들어 반응한다(타이머로만 말하는 티 방지).
+        const reactive = !mentioned && shouldTriggerReactiveReply(this.room, message, now);
+        if (mentioned || reactive) {
+          ai.lastReactiveReplyAt = now;
+          const delay = mentioned ? 2000 + Math.random() * 3000 : 3000 + Math.random() * 4000;
+          await this.enqueueEvent({ id: crypto.randomUUID(), type: 'AI_REACTIVE_REPLY', dueAt: now + delay });
+        }
       }
     }
   }
@@ -288,15 +395,23 @@ export class GameRoomDO extends DurableObject<Env> {
     if (humanCount < MIN_PLAYERS_TO_START) {
       return this.sendError(ws, `최소 ${MIN_PLAYERS_TO_START}명이 모여야 시작할 수 있습니다.`);
     }
+    const hostId = this.room.hostId;
+    const notReady = this.room.players.filter((p) => !p.isAI && p.id !== hostId && !p.isReady);
+    if (notReady.length > 0) {
+      return this.sendError(ws, '모든 참가자가 준비 완료해야 시작할 수 있습니다.');
+    }
 
     const aiPlayer: Player = {
       id: crypto.randomUUID(),
       nickname: '', // 아래에서 전원과 함께 다시 배정됨
+      lobbyNickname: '',
       isAI: true,
       isAlive: true,
       connected: true,
       disconnectedAt: null,
-      lastMentionReplyAt: null,
+      lastSeenAt: null,
+      lastReactiveReplyAt: null,
+      isReady: true,
     };
     this.room.players.push(aiPlayer);
 
@@ -313,9 +428,54 @@ export class GameRoomDO extends DurableObject<Env> {
     });
 
     this.room.topic = pickRandomTopic();
+    this.room.aiPersona = pickAiPersona();
     this.room.round = 1;
+    // 대기실 잡담과 게임 중 대화는 구분돼야 하므로, 시작하는 순간 채팅 로그를 비운다.
+    this.room.chatLog = [];
     await this.startDiscussionPhase();
     await this.syncLobby();
+  }
+
+  private async handlePlayerReady(player: Player, ready: boolean) {
+    if (!this.room) return;
+    if (this.room.phase !== 'LOBBY') return;
+    if (player.id === this.room.hostId) return; // 방장은 준비 상태 없이 바로 시작 버튼으로 제어
+    player.isReady = Boolean(ready);
+    await this.persist();
+    this.broadcastState();
+  }
+
+  private async handlePlayerKick(ws: WebSocket, player: Player, targetId: string) {
+    if (!this.room) return;
+    if (this.room.phase !== 'LOBBY') return this.sendError(ws, '게임 중에는 강퇴할 수 없습니다.');
+    if (player.id !== this.room.hostId) return this.sendError(ws, '방장만 강퇴할 수 있습니다.');
+    if (targetId === player.id) return this.sendError(ws, '자기 자신은 강퇴할 수 없습니다.');
+    const target = this.room.players.find((p) => p.id === targetId);
+    if (!target) return this.sendError(ws, '대상을 찾을 수 없습니다.');
+
+    await this.kickPlayer(targetId, '방장에 의해 강퇴되었습니다.');
+  }
+
+  // 방장 강퇴, 비속어 3회 누적 등 "즉시 강제 퇴장"이 필요한 모든 경로가 공유하는 헬퍼.
+  // 대상의 소켓에 사유를 담아 kicked를 보내고 닫은 뒤, 방에서 제거한다.
+  private async kickPlayer(targetId: string, reason: string) {
+    if (this.room) {
+      const target = this.room.players.find((p) => p.id === targetId);
+      if (target?.appwriteUserId && !this.room.kickedUserIds.includes(target.appwriteUserId)) {
+        this.room.kickedUserIds.push(target.appwriteUserId);
+      }
+    }
+    for (const sock of this.ctx.getWebSockets()) {
+      const attachment = sock.deserializeAttachment() as { playerId?: string } | null;
+      if (attachment?.playerId !== targetId) continue;
+      try {
+        sock.send(JSON.stringify({ type: 'kicked', payload: { reason } } satisfies ServerMessage));
+        sock.close(1000, 'kicked');
+      } catch {
+        // 이미 끊긴 소켓은 무시
+      }
+    }
+    await this.removePlayer(targetId);
   }
 
   // ---------------- 게임 상태머신 ----------------
@@ -438,15 +598,25 @@ export class GameRoomDO extends DurableObject<Env> {
     if (!this.room) return;
     const loggedInPlayers = this.room.players.filter((p) => !p.isAI && p.appwriteUserId);
     for (const p of loggedInPlayers) {
-      await recordGameResult(this.env, p.appwriteUserId!, p.appwriteDisplayName || p.nickname, winner === 'HUMANS');
+      await recordGameResult(this.env, p.appwriteUserId!, p.lobbyNickname || p.appwriteDisplayName || p.nickname, winner === 'HUMANS');
     }
   }
 
-  private async emitAiMessage() {
+  private async emitAiMessage(reactive: boolean) {
     if (!this.room) return;
-    const text = await generateAiMessage(this.room, this.env);
     const ai = findAiPlayer(this.room);
-    if (!text || !ai || this.room.phase !== 'DISCUSSION') return;
+    if (!ai) return;
+
+    // 반응형 발화면, 예약 당시가 아니라 지금 시점 기준 가장 최근 사람 메시지에 반응하게 한다
+    // (딜레이 몇 초 사이에 대화가 더 진행됐을 수 있으므로 최신 걸 기준으로 삼는다).
+    let reactingTo: ReactingTo | undefined;
+    if (reactive) {
+      const lastHuman = [...this.room.chatLog].reverse().find((m) => m.playerId !== ai.id);
+      if (lastHuman) reactingTo = { nickname: lastHuman.nickname, text: lastHuman.text };
+    }
+
+    const text = await generateAiMessage(this.room, this.env, reactingTo);
+    if (!text || this.room.phase !== 'DISCUSSION') return;
 
     const message: ChatMessage = { id: crypto.randomUUID(), playerId: ai.id, nickname: ai.nickname, text, ts: Date.now() };
     this.room.chatLog.push(message);
@@ -481,6 +651,8 @@ export class GameRoomDO extends DurableObject<Env> {
   async alarm() {
     await this.loaded;
     if (!this.room) return;
+    await this.checkStaleConnections();
+    if (!this.room) return;
 
     const now = Date.now();
     const due = this.events.filter((e) => e.dueAt <= now).sort((a, b) => a.dueAt - b.dueAt);
@@ -499,8 +671,10 @@ export class GameRoomDO extends DurableObject<Env> {
           if (this.room.phase === 'ROUND_RESULT') await this.checkWinCondition();
           break;
         case 'AI_MESSAGE':
-        case 'AI_MENTION_REPLY':
-          if (this.room.phase === 'DISCUSSION') await this.emitAiMessage();
+          if (this.room.phase === 'DISCUSSION') await this.emitAiMessage(false);
+          break;
+        case 'AI_REACTIVE_REPLY':
+          if (this.room.phase === 'DISCUSSION') await this.emitAiMessage(true);
           break;
         case 'DISCONNECT_GRACE': {
           const targetId = event.payload?.playerId as string | undefined;
@@ -611,6 +785,14 @@ export class GameRoomDO extends DurableObject<Env> {
     }
   }
 
+  private sendChatMuted(ws: WebSocket, mutedUntil: number) {
+    try {
+      ws.send(JSON.stringify({ type: 'chat:muted', payload: { mutedUntil } } satisfies ServerMessage));
+    } catch {
+      // 죽은 소켓은 무시
+    }
+  }
+
   private serializeRoom(): RoomStateView {
     if (!this.room) throw new Error('room not initialized');
     const room = this.room;
@@ -632,6 +814,7 @@ export class GameRoomDO extends DurableObject<Env> {
         isAlive: p.isAlive,
         connected: p.connected,
         isHost: p.id === room.hostId,
+        isReady: p.isReady,
         isAI: gameOver || room.revealed.includes(p.id) ? p.isAI : undefined,
       })),
       chatLog: room.chatLog.slice(-200),

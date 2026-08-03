@@ -20,6 +20,7 @@ import ConfirmModal from '@/components/ConfirmModal';
 import SetNicknameModal from '@/components/SetNicknameModal';
 import TopicBanner from '@/components/TopicBanner';
 import AlertModal from '@/components/AlertModal';
+import ChatMuteModal from '@/components/ChatMuteModal';
 import ToastStack, { type ToastItem } from '@/components/ToastStack';
 
 type JoinPhase = 'checking' | 'notJoined' | 'joined';
@@ -45,6 +46,8 @@ export default function RoomPage() {
   const [gameOver, setGameOver] = useState<GameOverPayload | null>(null);
   const [showNicknameInfo, setShowNicknameInfo] = useState(false);
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
+  const [chatMutedUntil, setChatMutedUntil] = useState<number | null>(null);
+  const [profanityWarning, setProfanityWarning] = useState<string | null>(null);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const receivedStateRef = useRef(false);
   const roomRef = useRef<RoomState | null>(null);
@@ -103,9 +106,28 @@ export default function RoomPage() {
       setVoteProgress(null);
     },
     'game:over': (payload) => setGameOver(payload),
+    'chat:muted': (payload) => setChatMutedUntil(payload.mutedUntil),
+    'chat:warning': (payload) => {
+      setProfanityWarning(
+        `비속어 사용이 감지돼서 메시지가 가려졌어요. 경고 ${payload.count}/${payload.limit}회 — ${payload.limit}회 누적되면 강제 퇴장돼요.`
+      );
+    },
+    kicked: (payload) => {
+      // 강퇴/제재로 방에서 나가게 된 거라 이 방 링크에 남겨둘 이유가 없다 — 메인 로비로 보낸다.
+      clearSession(roomId);
+      router.push(`/?notice=${encodeURIComponent(payload.reason)}`);
+    },
     error: (payload) => {
+      if (payload.message === '플레이어 정보를 찾을 수 없습니다.' && receivedStateRef.current) {
+        // 이미 방에 있었는데 재접속 시 서버가 나를 제거한 상태(유예 만료, 연결 끊김 자동 감지 등)로
+        // 확인됨 = 더 이상 이 방에 남아있을 이유가 없으니 메인 로비로 보낸다.
+        clearSession(roomId);
+        router.push(`/?notice=${encodeURIComponent('접속이 끊겨서 방에서 나가졌어요.')}`);
+        return;
+      }
       if (!receivedStateRef.current) {
-        // 첫 room:state를 받기 전 에러 = 저장된 세션이 더 이상 유효하지 않음
+        // 첫 room:state를 받기 전 에러 = 저장된 세션이 더 이상 유효하지 않음. 이 방 자체는
+        // 여전히 유효할 수 있으니(잘못된 세션일 뿐) 같은 화면에서 "입장하기"로 다시 시도하게 한다.
         clearSession(roomId);
         setPlayerId(null);
         setJoinPhase('notJoined');
@@ -139,6 +161,14 @@ export default function RoomPage() {
     sendMessage({ type: 'game:start' });
   }
 
+  function handleToggleReady(ready: boolean) {
+    sendMessage({ type: 'player:ready', ready });
+  }
+
+  function handleKick(targetId: string) {
+    sendMessage({ type: 'player:kick', targetId });
+  }
+
   function handleSend(text: string) {
     sendMessage({ type: 'chat:send', text });
   }
@@ -167,7 +197,7 @@ export default function RoomPage() {
         <h1 className="text-center text-xl font-bold">방 입장</h1>
         <p className="text-center text-sm text-neutral-500">코드: {roomId}</p>
         <p className="text-center text-xs text-neutral-600">
-          입장하면 닉네임이 자동으로 배정돼요.
+          이미 정해둔 닉네임이 있으면 그대로 쓰고, 처음이면 새로 정할 수 있어요.
         </p>
         {!authLoading && !user && (
           <p className="text-center text-xs text-neutral-500">입장하려면 로그인이 필요해요.</p>
@@ -196,10 +226,12 @@ export default function RoomPage() {
       <header className="flex items-center justify-between gap-2">
         <div>
           <h1 className="text-lg font-bold">{room.name}</h1>
-          <p className="text-xs text-neutral-500">
-            코드: {room.id}
-            {room.round > 0 && ` · ${room.round}라운드`}
-          </p>
+          {room.phase !== 'LOBBY' && (
+            <p className="text-xs text-neutral-500">
+              코드: {room.id}
+              {room.round > 0 && ` · ${room.round}라운드`}
+            </p>
+          )}
         </div>
         <div className="flex items-center gap-2">
           {room.phase !== 'LOBBY' && room.phase !== 'GAME_OVER' && (
@@ -215,7 +247,17 @@ export default function RoomPage() {
       </header>
 
       {room.phase === 'LOBBY' ? (
-        <WaitingRoom room={room} viewerId={viewerId} onStart={handleStart} startError={actionError} />
+        <WaitingRoom
+          room={room}
+          viewerId={viewerId}
+          onStart={handleStart}
+          startError={actionError}
+          onToggleReady={handleToggleReady}
+          onKick={handleKick}
+          onSend={handleSend}
+          onCopyInvite={() => pushToast('코드가 복사되었습니다')}
+          chatMutedUntil={chatMutedUntil}
+        />
       ) : (
         <div className="grid flex-1 grid-cols-1 gap-4 sm:grid-cols-[200px_1fr]">
           <PlayerSidebar room={room} viewerId={viewerId} />
@@ -233,7 +275,7 @@ export default function RoomPage() {
               <ChatBox
                 messages={room.chatLog}
                 viewerId={viewerId}
-                disabled={!self?.isAlive || room.phase !== 'DISCUSSION'}
+                disabled={!self?.isAlive || room.phase !== 'DISCUSSION' || chatMutedUntil !== null}
                 onSend={handleSend}
               />
             )}
@@ -262,6 +304,12 @@ export default function RoomPage() {
       )}
       {needsNickname && (
         <SetNicknameModal suggested={nicknameSuggestion} onSubmit={handleSetNickname} />
+      )}
+      {chatMutedUntil !== null && (
+        <ChatMuteModal mutedUntil={chatMutedUntil} onClose={() => setChatMutedUntil(null)} />
+      )}
+      {profanityWarning && (
+        <AlertModal title={profanityWarning} onClose={() => setProfanityWarning(null)} />
       )}
       <ToastStack toasts={toasts} />
     </main>

@@ -23,11 +23,24 @@ export type GamePhase = 'LOBBY' | 'DISCUSSION' | 'VOTING' | 'ROUND_RESULT' | 'GA
 export interface Player {
   id: string;
   nickname: string;
+  // 게임 시작 시 nickname이 "1번/2번..."으로 덮어써지므로, 전적 기록에 쓸 계정 고정 닉네임을 따로 보관.
+  lobbyNickname: string;
   isAI: boolean;
   isAlive: boolean;
   connected: boolean;
   disconnectedAt: number | null;
-  lastMentionReplyAt: number | null;
+  // 마지막으로 뭐든(hello/ping/채팅/투표 등) 메시지를 보낸 시각. 소켓이 정상 종료 신호 없이
+  // 그냥 조용히 죽었을 때(노트북 잠자기, 네트워크 끊김 등)를 감지하는 데 쓴다.
+  lastSeenAt: number | null;
+  // AI가 직접 언급되거나(mention) 대화에 반응해서 끼어들 때(reactive) 공유하는 쿨다운 기준 시각.
+  lastReactiveReplyAt: number | null;
+  // 대기실에서 게임 시작 준비가 됐는지 (방장은 체크하지 않음).
+  isReady: boolean;
+  // 채팅 도배 방지: 최근에 보낸 메시지 시각들, 그리고 도배로 걸렸을 때 풀리는 시각.
+  recentChatTimestamps?: number[];
+  mutedUntil?: number | null;
+  // 비속어 사용 누적 횟수. PROFANITY_KICK_LIMIT회 채우면 강제 퇴장.
+  profanityStrikes?: number;
   // 로그인된 경우에만 채워짐. 다른 플레이어에게는 절대 노출하지 않고 전적 기록에만 쓴다.
   appwriteUserId?: string;
   appwriteDisplayName?: string;
@@ -44,6 +57,14 @@ export interface ChatMessage {
 export interface DiscussionTopic {
   title: string;
   question: string;
+}
+
+// AI가 캐물어도 일관되게 답할 수 있도록 게임 시작 시 한 번 뽑아 게임 내내 유지하는 가짜 신상.
+export interface AiPersona {
+  age: number;
+  job: string;
+  mbti: string;
+  recentEvent: string;
 }
 
 export interface RoomData {
@@ -63,6 +84,11 @@ export interface RoomData {
   createdAt: number;
   // 게임 시작 시 한 번 뽑혀서 게임 내내 유지되는 대화 주제 (로비에서는 없음).
   topic: DiscussionTopic | null;
+  // 게임 시작 시 한 번 뽑혀서 게임 내내 유지되는 AI의 가짜 신상 (로비에서는 없음).
+  aiPersona: AiPersona | null;
+  // 이 방에서 강퇴(방장 강퇴, 비속어 누적 등)당한 적 있는 계정의 Appwrite 유저 ID 목록.
+  // 재입장을 막기 위해 방이 존재하는 한 계속 유지한다.
+  kickedUserIds: string[];
 }
 
 export type ScheduledEventType =
@@ -70,7 +96,7 @@ export type ScheduledEventType =
   | 'VOTING_END'
   | 'ROUND_ADVANCE'
   | 'AI_MESSAGE'
-  | 'AI_MENTION_REPLY'
+  | 'AI_REACTIVE_REPLY'
   | 'DISCONNECT_GRACE';
 
 export interface ScheduledEvent {
@@ -94,6 +120,7 @@ export interface PlayerView {
   isAlive: boolean;
   connected: boolean;
   isHost: boolean;
+  isReady: boolean;
   isAI?: boolean; // 탈락 공개 또는 게임 종료 전에는 서버가 아예 내려주지 않음
 }
 
@@ -139,6 +166,9 @@ export type ServerMessage =
   | { type: 'vote:progress'; payload: VoteProgressPayload }
   | { type: 'game:roundResult'; payload: RoundResultPayload }
   | { type: 'game:over'; payload: GameOverPayload }
+  | { type: 'kicked'; payload: { reason: string } }
+  | { type: 'chat:muted'; payload: { mutedUntil: number } }
+  | { type: 'chat:warning'; payload: { count: number; limit: number } }
   | { type: 'error'; payload: { message: string } };
 
 // 클라이언트 -> 서버 WebSocket 메시지 봉투
@@ -147,4 +177,6 @@ export type ClientMessage =
   | { type: 'chat:send'; text: string }
   | { type: 'vote:cast'; targetId: string }
   | { type: 'game:start' }
+  | { type: 'player:ready'; ready: boolean }
+  | { type: 'player:kick'; targetId: string }
   | { type: 'ping' };
