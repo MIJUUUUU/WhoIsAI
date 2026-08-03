@@ -6,9 +6,13 @@ import Modal from './Modal';
 export default function GameOverModal({
   payload,
   onLeave,
+  onReturnToLobby,
+  isHost,
 }: {
   payload: GameOverPayload;
   onLeave: () => void;
+  onReturnToLobby: () => void;
+  isHost: boolean;
 }) {
   return (
     <Modal>
@@ -28,11 +32,23 @@ export default function GameOverModal({
             </li>
           ))}
         </ul>
+        {isHost && (
+          <button
+            onClick={onReturnToLobby}
+            className="mt-4 w-full rounded-xl bg-emerald-600 py-3 font-semibold hover:bg-emerald-500"
+          >
+            대기실로 돌아가기
+          </button>
+        )}
         <button
           onClick={onLeave}
-          className="mt-4 w-full rounded-xl bg-emerald-600 py-3 font-semibold hover:bg-emerald-500"
+          className={`w-full rounded-xl py-3 font-semibold ${
+            isHost
+              ? 'mt-2 bg-neutral-800 hover:bg-neutral-700'
+              : 'mt-4 bg-emerald-600 hover:bg-emerald-500'
+          }`}
         >
-          로비로 돌아가기
+          로비로 나가기
         </button>
       </div>
     </Modal>

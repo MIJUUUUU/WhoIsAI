@@ -206,6 +206,14 @@ export default function RoomPage() {
     setShowLeaveConfirm(true);
   }
 
+  function handleReturnToLobby() {
+    sendMessage({ type: 'return_to_lobby' });
+    setGameOver(null);
+    setRoundResult(null);
+    setVoteProgress(null);
+    setHasVoted(false);
+  }
+
   if (joinPhase === 'checking') {
     return <CenteredMessage text="입장 확인 중..." />;
   }
@@ -309,7 +317,12 @@ export default function RoomPage() {
 
       {room.phase === 'ROUND_RESULT' && roundResult && <RoundResultModal result={roundResult} />}
       {room.phase === 'GAME_OVER' && gameOver && (
-        <GameOverModal payload={gameOver} onLeave={handleLeave} />
+        <GameOverModal
+          payload={gameOver}
+          onLeave={handleLeave}
+          onReturnToLobby={handleReturnToLobby}
+          isHost={room.hostId === viewerId}
+        />
       )}
       {showNicknameInfo && self && (
         <NicknameInfoModal
@@ -320,7 +333,11 @@ export default function RoomPage() {
       )}
       {showLeaveConfirm && (
         <ConfirmModal
-          title="정말 방을 나가시겠어요?"
+          title={
+            room.phase !== 'LOBBY'
+              ? '게임이 진행 중이에요. 정말 나가시겠어요? 나가면 1분간 이 방에 다시 들어올 수 없어요.'
+              : '정말 방을 나가시겠어요?'
+          }
           confirmLabel="나가기"
           onConfirm={handleLeave}
           onCancel={() => setShowLeaveConfirm(false)}
