@@ -83,7 +83,7 @@ export async function generateAiMessage(
   // 그냥 "네 차례다"라고만 하면 대화 흐름을 무시하고 예전 화제로 답하는 경우가 있어서,
   // 반응형으로 불렸을 땐 방금 나온 메시지를 못박아 그것에 직접 답하도록 시킨다.
   const userPrompt = reactingTo
-    ? `최근 대화:\n${transcript}\n\n방금 "${reactingTo.nickname}"가 "${reactingTo.text}"라고 말했다. 이 대화 다른 옛날 화제 말고 반드시 이 말에 자연스럽게 반응하거나 답하는 채팅 메시지 하나만 작성해라.`
+    ? `최근 대화:\n${transcript}\n\n방금 "${reactingTo.nickname}"가 "${reactingTo.text}"라고 말했다. 이 말에 대한 네 생각이나 답을 구체적으로 먼저 말해라. 질문을 그대로 되묻거나 "너희는 어때?" 식으로 얼버무리지 말고, 다른 옛날 화제로 새지도 마라. 채팅 메시지 하나만 작성해라.`
     : `최근 대화:\n${transcript}\n\n이제 네 차례다. 지금까지 흐름에 자연스럽게 이어지는 채팅 메시지 하나만 작성해라.`;
 
   try {
