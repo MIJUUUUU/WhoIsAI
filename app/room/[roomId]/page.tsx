@@ -140,7 +140,9 @@ export default function RoomPage() {
 
   async function handleJoin() {
     if (!user) {
-      login(`/room/${roomId}`);
+      // autojoin 표시를 남겨서, 로그인 후 돌아왔을 때 또 "입장하기"를 누르게 하지 않고
+      // 바로 입장 처리한다 (진짜 링크로 막 들어온 경우와 구분하기 위한 표시).
+      login(`/room/${roomId}?autojoin=1`);
       return;
     }
     setJoining(true);
@@ -155,6 +157,22 @@ export default function RoomPage() {
     setPlayerId(res.playerId);
     setJoinPhase('joined');
   }
+
+  useEffect(() => {
+    // 로그인이 필요해서 로그인 페이지로 갔다가 돌아온 경우(autojoin 표시가 있음)엔
+    // "입장하기"를 또 누르게 하지 않고 바로 입장시킨다. 진짜 링크로 막 들어온 경우엔
+    // 이 표시가 없으니 그대로 확인 화면이 보인다.
+    if (authLoading || !user || joinPhase !== 'notJoined') return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('autojoin') !== '1') return;
+    router.replace(`/room/${roomId}`);
+    // URL의 autojoin 표시(외부 신호)를 반영해 자동 입장시키는 것이므로 effect 내 호출이 맞다.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    handleJoin();
+    // handleJoin은 매 렌더 새로 만들어지고, 이 effect는 autojoin 파라미터가 사라지면 스스로
+    // 멈추므로 의존성에 넣지 않는다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authLoading, user, joinPhase, roomId, router]);
 
   function handleStart() {
     setActionError(null);
@@ -237,6 +255,11 @@ export default function RoomPage() {
         <div className="flex items-center gap-2">
           {room.phase !== 'LOBBY' && room.phase !== 'GAME_OVER' && (
             <RoundTimer endsAt={room.phaseEndsAt} />
+          )}
+          {user && (
+            <span className="text-sm text-neutral-400">
+              {(user.prefs as { nickname?: string }).nickname || user.name || user.email}
+            </span>
           )}
           <button
             onClick={requestLeave}

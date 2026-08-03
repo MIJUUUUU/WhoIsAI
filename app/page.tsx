@@ -53,7 +53,9 @@ export default function LobbyPage() {
 
   async function handleJoin(roomId: string) {
     if (!user) {
-      login(`/room/${roomId}`);
+      // autojoin 표시를 남겨서, 로그인 후 방 페이지로 돌아왔을 때 또 한 번 누르게 하지 않고
+      // 바로 입장 처리되게 한다.
+      login(`/room/${roomId}?autojoin=1`);
       return;
     }
     setJoining(true);

@@ -129,6 +129,13 @@ export class GameRoomDO extends DurableObject<Env> {
       return { error: '강퇴당한 방에는 다시 입장할 수 없습니다.' };
     }
 
+    // 다른 탭/기기에서 같은 계정으로 이미 이 방에 참가 중이면, 새 플레이어를 또 만들지 않고
+    // 기존 자리를 그대로 돌려준다 (닉네임이 자기 자신과 겹쳐서 엉뚱한 닉네임으로 중복 입장되는 걸 방지).
+    const existing = this.room.players.find((p) => !p.isAI && p.appwriteUserId === identity.id);
+    if (existing) {
+      return { playerId: existing.id, nickname: existing.nickname, room: this.serializeRoom() };
+    }
+
     const humanCount = this.room.players.filter((p) => !p.isAI).length;
     if (humanCount >= this.room.maxPlayers) return { error: '방 인원이 가득 찼습니다.' };
 
