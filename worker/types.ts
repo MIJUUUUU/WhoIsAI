@@ -179,4 +179,5 @@ export type ClientMessage =
   | { type: 'game:start' }
   | { type: 'player:ready'; ready: boolean }
   | { type: 'player:kick'; targetId: string }
+  | { type: 'leave' }
   | { type: 'ping' };

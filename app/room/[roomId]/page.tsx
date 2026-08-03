@@ -179,6 +179,7 @@ export default function RoomPage() {
   }
 
   function handleLeave() {
+    sendMessage({ type: 'leave' });
     clearSession(roomId);
     router.push('/');
   }

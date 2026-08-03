@@ -234,6 +234,10 @@ export class GameRoomDO extends DurableObject<Env> {
       await this.handlePlayerReady(player, msg.ready);
     } else if (msg.type === 'player:kick') {
       await this.handlePlayerKick(ws, player, msg.targetId);
+    } else if (msg.type === 'leave') {
+      // 명시적으로 나가기를 누른 확실한 사용자 의도이므로, 연결 끊김 자동감지의
+      // "혼자면 방을 통째로 없애지 않는다" 예외와 달리 무조건 바로 제거한다.
+      await this.removePlayer(player.id);
     }
   }
 
