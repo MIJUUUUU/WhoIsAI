@@ -31,13 +31,13 @@ export default function ChatBox({
 
   return (
     <div className="flex flex-1 flex-col rounded-xl border border-neutral-800 bg-neutral-900">
-      <div className="flex-1 space-y-2 overflow-y-auto p-3" style={{ minHeight: 320, maxHeight: 420 }}>
+      <div className="thin-scrollbar flex-1 space-y-2 overflow-y-auto p-3" style={{ minHeight: 320, maxHeight: 420 }}>
         {messages.length === 0 && (
           <p className="py-8 text-center text-sm text-neutral-600">아직 대화가 없어요. 먼저 말을 걸어보세요.</p>
         )}
         {messages.map((m) => (
           <div key={m.id} className={m.playerId === viewerId ? 'text-right' : ''}>
-            <span className="text-xs text-neutral-500">{m.nickname}</span>
+            <span className="block text-xs text-neutral-500">{m.nickname}</span>
             <p
               className={`inline-block max-w-[80%] break-words rounded-lg px-3 py-1.5 text-sm ${
                 m.playerId === viewerId ? 'bg-emerald-700' : 'bg-neutral-800'

@@ -4,7 +4,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ClientMessage, ServerMessage } from '@/types/game';
 
 type ServerMessageType = ServerMessage['type'];
-type PayloadOf<T extends ServerMessageType> = Extract<ServerMessage, { type: T }>['payload'];
+// payload가 없는 메시지 타입(예: 'kicked')도 있으므로 조건부 타입으로 안전하게 추출한다.
+type PayloadOf<T extends ServerMessageType> =
+  Extract<ServerMessage, { type: T }> extends { payload: infer P } ? P : undefined;
 type Handlers = Partial<{ [K in ServerMessageType]: (payload: PayloadOf<K>) => void }>;
 
 const MAX_RECONNECT_DELAY_MS = 10000;
@@ -51,7 +53,7 @@ export function useGameSocket(roomId: string | null, playerId: string | null, ha
         try {
           const msg = JSON.parse(event.data) as ServerMessage;
           const handler = handlersRef.current[msg.type] as ((payload: unknown) => void) | undefined;
-          handler?.(msg.payload);
+          handler?.('payload' in msg ? msg.payload : undefined);
         } catch {
           // 잘못된 메시지는 무시
         }

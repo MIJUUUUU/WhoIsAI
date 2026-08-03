@@ -40,6 +40,17 @@ export default function LobbyPage() {
     };
   }, []);
 
+  useEffect(() => {
+    // 강퇴/연결끊김 등으로 방에서 쫓겨나 로비로 돌아왔을 때 사유를 보여주기 위한 쿼리 파라미터.
+    // URL(외부 신호) 값을 반영하는 것이므로 effect 내 setState가 맞다.
+    const notice = new URLSearchParams(window.location.search).get('notice');
+    if (notice) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setJoinError(notice);
+      router.replace('/');
+    }
+  }, [router]);
+
   async function handleJoin(roomId: string) {
     if (!user) {
       login(`/room/${roomId}`);
