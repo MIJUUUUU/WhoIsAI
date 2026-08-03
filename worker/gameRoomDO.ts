@@ -38,6 +38,11 @@ const PROFANITY_KICK_LIMIT = 3;
 // 클라이언트 ping 주기(15초)보다 넉넉히 커야 정상 연결을 오탐하지 않는다.
 // 백그라운드 탭은 브라우저가 타이머를 강하게 스로틀링해서 40초 정도로는 오탐이 났었어서 더 넉넉하게 잡는다.
 const STALE_CONNECTION_MS = 90 * 1000;
+// 게임 진행 중 명시적으로 나간 계정은 이 시간 동안 같은 방에 재입장 못 한다.
+const REJOIN_BLOCK_MS = 60 * 1000;
+// AI가 실제로 메시지를 보낸 뒤 최소 이만큼은 지나야 다시 말한다 (스케줄 발화와 반응형 발화가
+// 우연히 겹쳐서 사람 없이 AI 혼자 연달아 두 번 말하는 부자연스러운 상황을 막기 위함).
+const MIN_AI_MESSAGE_GAP_MS = 6000;
 
 export class GameRoomDO extends DurableObject<Env> {
   room: RoomData | null = null;
@@ -111,6 +116,7 @@ export class GameRoomDO extends DurableObject<Env> {
       topic: null,
       aiPersona: null,
       kickedUserIds: [],
+      rejoinBlockedUntil: {},
     };
     this.events = [];
     await this.persist();
@@ -127,6 +133,11 @@ export class GameRoomDO extends DurableObject<Env> {
     if (!identity) return { error: '로그인 후 이용할 수 있습니다.' };
     if (this.room.kickedUserIds.includes(identity.id)) {
       return { error: '강퇴당한 방에는 다시 입장할 수 없습니다.' };
+    }
+    const blockedUntil = this.room.rejoinBlockedUntil[identity.id];
+    if (blockedUntil && Date.now() < blockedUntil) {
+      const remainingSec = Math.ceil((blockedUntil - Date.now()) / 1000);
+      return { error: `게임 중 나간 방은 ${remainingSec}초 후 다시 입장할 수 있어요.` };
     }
 
     // 다른 탭/기기에서 같은 계정으로 이미 이 방에 참가 중이면, 새 플레이어를 또 만들지 않고
@@ -244,7 +255,13 @@ export class GameRoomDO extends DurableObject<Env> {
     } else if (msg.type === 'leave') {
       // 명시적으로 나가기를 누른 확실한 사용자 의도이므로, 연결 끊김 자동감지의
       // "혼자면 방을 통째로 없애지 않는다" 예외와 달리 무조건 바로 제거한다.
+      if (this.room.phase !== 'LOBBY' && player.appwriteUserId) {
+        // 게임 진행 중에 나가면 이 방에는 잠시(REJOIN_BLOCK_MS) 다시 못 들어오게 막는다.
+        this.room.rejoinBlockedUntil[player.appwriteUserId] = Date.now() + REJOIN_BLOCK_MS;
+      }
       await this.removePlayer(player.id);
+    } else if (msg.type === 'return_to_lobby') {
+      await this.handleReturnToLobby(ws, player);
     }
   }
 
@@ -438,13 +455,43 @@ export class GameRoomDO extends DurableObject<Env> {
       p.nickname = `${idx + 1}번`;
     });
 
-    this.room.topic = pickRandomTopic();
     this.room.aiPersona = pickAiPersona();
     this.room.round = 1;
     // 대기실 잡담과 게임 중 대화는 구분돼야 하므로, 시작하는 순간 채팅 로그를 비운다.
     this.room.chatLog = [];
     await this.startDiscussionPhase();
     await this.syncLobby();
+  }
+
+  // 게임이 끝난 뒤 방을 없애지 않고 대기실로 되돌려서 같은 인원으로 바로 다시 시작할 수 있게 한다.
+  private async handleReturnToLobby(ws: WebSocket, player: Player) {
+    if (!this.room) return;
+    if (this.room.phase !== 'GAME_OVER') {
+      return this.sendError(ws, '게임이 끝난 후에만 대기실로 돌아갈 수 있습니다.');
+    }
+    if (player.id !== this.room.hostId) return this.sendError(ws, '방장만 대기실로 되돌릴 수 있습니다.');
+
+    // AI는 게임 시작 시에만 새로 생기므로 제거하고, 남은 사람들은 대기실 상태로 초기화한다.
+    this.room.players = this.room.players.filter((p) => !p.isAI);
+    this.room.players.forEach((p) => {
+      p.nickname = p.lobbyNickname;
+      p.isAlive = true;
+      p.isReady = false;
+    });
+    this.room.phase = 'LOBBY';
+    this.room.round = 0;
+    this.room.phaseEndsAt = null;
+    this.room.winner = null;
+    this.room.votes = {};
+    this.room.revealed = [];
+    this.room.topic = null;
+    this.room.aiPersona = null;
+    this.room.chatLog = [];
+    this.events = [];
+
+    await this.persist();
+    await this.syncLobby();
+    this.broadcastState();
   }
 
   private async handlePlayerReady(player: Player, ready: boolean) {
@@ -496,6 +543,8 @@ export class GameRoomDO extends DurableObject<Env> {
     this.room.phase = 'DISCUSSION';
     this.room.phaseEndsAt = Date.now() + this.discussionMs;
     this.room.votes = {};
+    // 매 라운드 새 주제를 뽑는다 (라운드가 넘어가도 이전 주제 그대로 남아있던 문제 수정).
+    this.room.topic = pickRandomTopic();
     await this.persist();
     this.broadcastState();
 
@@ -618,6 +667,11 @@ export class GameRoomDO extends DurableObject<Env> {
     const ai = findAiPlayer(this.room);
     if (!ai) return;
 
+    // 스케줄된 발화와 반응형 발화가 우연히 겹쳐서, 아무도 안 끼었는데 AI 혼자 연달아 두 번
+    // 말하는 부자연스러운 상황을 막는다.
+    const now = Date.now();
+    if (ai.lastMessageAt && now - ai.lastMessageAt < MIN_AI_MESSAGE_GAP_MS) return;
+
     // 반응형 발화면, 예약 당시가 아니라 지금 시점 기준 가장 최근 사람 메시지에 반응하게 한다
     // (딜레이 몇 초 사이에 대화가 더 진행됐을 수 있으므로 최신 걸 기준으로 삼는다).
     let reactingTo: ReactingTo | undefined;
@@ -629,6 +683,7 @@ export class GameRoomDO extends DurableObject<Env> {
     const text = await generateAiMessage(this.room, this.env, reactingTo);
     if (!text || this.room.phase !== 'DISCUSSION') return;
 
+    ai.lastMessageAt = Date.now();
     const message: ChatMessage = { id: crypto.randomUUID(), playerId: ai.id, nickname: ai.nickname, text, ts: Date.now() };
     this.room.chatLog.push(message);
     await this.persist();

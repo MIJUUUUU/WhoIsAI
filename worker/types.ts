@@ -34,6 +34,9 @@ export interface Player {
   lastSeenAt: number | null;
   // AI가 직접 언급되거나(mention) 대화에 반응해서 끼어들 때(reactive) 공유하는 쿨다운 기준 시각.
   lastReactiveReplyAt: number | null;
+  // AI가 실제로 마지막 메시지를 보낸 시각(AI 전용). 스케줄 발화와 반응형 발화가 우연히 겹쳐서
+  // 연달아 두 번 말하는 걸 막는 최소 간격 체크에 쓴다.
+  lastMessageAt?: number | null;
   // 대기실에서 게임 시작 준비가 됐는지 (방장은 체크하지 않음).
   isReady: boolean;
   // 채팅 도배 방지: 최근에 보낸 메시지 시각들, 그리고 도배로 걸렸을 때 풀리는 시각.
@@ -89,6 +92,8 @@ export interface RoomData {
   // 이 방에서 강퇴(방장 강퇴, 비속어 누적 등)당한 적 있는 계정의 Appwrite 유저 ID 목록.
   // 재입장을 막기 위해 방이 존재하는 한 계속 유지한다.
   kickedUserIds: string[];
+  // 게임 진행 중에 직접 나간 계정의 Appwrite 유저 ID -> 재입장 가능해지는 시각(ms).
+  rejoinBlockedUntil: Record<string, number>;
 }
 
 export type ScheduledEventType =
@@ -180,4 +185,5 @@ export type ClientMessage =
   | { type: 'player:ready'; ready: boolean }
   | { type: 'player:kick'; targetId: string }
   | { type: 'leave' }
+  | { type: 'return_to_lobby' }
   | { type: 'ping' };
