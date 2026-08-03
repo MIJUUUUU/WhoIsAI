@@ -8,9 +8,10 @@ export default function AuthStatus() {
   if (loading) return <div className="h-8" />;
 
   if (user) {
+    const nickname = (user.prefs as { nickname?: string }).nickname;
     return (
       <div className="flex items-center gap-2 text-sm">
-        <span className="text-neutral-400">{user.name || user.email}</span>
+        <span className="text-neutral-400">{nickname || user.name || user.email}</span>
         <button onClick={logout} className="rounded-lg bg-neutral-800 px-3 py-1 hover:bg-neutral-700">
           로그아웃
         </button>

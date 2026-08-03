@@ -38,20 +38,32 @@ export default function LeaderboardPage() {
 
       {entries && entries.length > 0 && (
         <ol className="space-y-2">
-          {entries.map((entry, i) => (
-            <li
-              key={entry.displayName + i}
-              className="flex items-center justify-between rounded-xl border border-neutral-800 bg-neutral-900 px-4 py-3"
-            >
-              <div className="flex items-center gap-3">
-                <span className="w-6 text-center text-sm text-neutral-500">{i + 1}</span>
-                <span className="font-medium">{entry.displayName}</span>
-              </div>
-              <span className="text-sm text-neutral-400">
-                {entry.wins}승 {entry.losses}패 ({entry.gamesPlayed}판)
-              </span>
-            </li>
-          ))}
+          {entries.map((entry, i) => {
+            const rankColor = [
+              'border-amber-400/60 bg-amber-400/10',
+              'border-slate-300/50 bg-slate-300/10',
+              'border-orange-600/50 bg-orange-600/10',
+            ][i];
+            const rankTextColor = ['text-amber-400', 'text-slate-300', 'text-orange-500'][i];
+            return (
+              <li
+                key={entry.displayName + i}
+                className={`flex items-center justify-between rounded-xl border px-4 py-3 ${
+                  rankColor ?? 'border-neutral-800 bg-neutral-900'
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <span className={`w-6 text-center text-sm font-bold ${rankTextColor ?? 'text-neutral-500'}`}>
+                    {i + 1}
+                  </span>
+                  <span className="font-medium">{entry.displayName}</span>
+                </div>
+                <span className="text-sm text-neutral-400">
+                  {entry.wins}승 {entry.losses}패 ({entry.gamesPlayed}판)
+                </span>
+              </li>
+            );
+          })}
         </ol>
       )}
     </main>
