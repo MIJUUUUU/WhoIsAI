@@ -41,6 +41,11 @@ export interface ChatMessage {
   ts: number;
 }
 
+export interface DiscussionTopic {
+  title: string;
+  question: string;
+}
+
 export interface RoomData {
   id: string;
   name: string;
@@ -56,6 +61,8 @@ export interface RoomData {
   votes: Record<string, string>;
   revealed: string[];
   createdAt: number;
+  // 게임 시작 시 한 번 뽑혀서 게임 내내 유지되는 대화 주제 (로비에서는 없음).
+  topic: DiscussionTopic | null;
 }
 
 export type ScheduledEventType =
@@ -103,6 +110,7 @@ export interface RoomStateView {
   winner: 'HUMANS' | 'AI' | null;
   players: PlayerView[];
   chatLog: ChatMessage[];
+  topic: DiscussionTopic | null;
 }
 
 export interface RoundResultPayload {

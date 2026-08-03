@@ -13,6 +13,7 @@ import {
 import { generateRandomNickname } from './names';
 import { findAiPlayer, generateAiMessage, randomMessageOffsets, shouldTriggerMentionReply } from './aiPlayer';
 import { verifyAppwriteJwt, recordGameResult, assignPersistentNickname, type AppwriteIdentity } from './appwrite';
+import { pickRandomTopic } from './topics';
 
 const MIN_MAX_PLAYERS = MIN_PLAYERS_TO_START;
 const MAX_MAX_PLAYERS = 10;
@@ -88,6 +89,7 @@ export class GameRoomDO extends DurableObject<Env> {
       votes: {},
       revealed: [],
       createdAt: Date.now(),
+      topic: null,
     };
     this.events = [];
     await this.persist();
@@ -310,6 +312,7 @@ export class GameRoomDO extends DurableObject<Env> {
       p.nickname = `${idx + 1}번`;
     });
 
+    this.room.topic = pickRandomTopic();
     this.room.round = 1;
     await this.startDiscussionPhase();
     await this.syncLobby();
@@ -622,6 +625,7 @@ export class GameRoomDO extends DurableObject<Env> {
       round: room.round,
       phaseEndsAt: room.phaseEndsAt,
       winner: room.winner,
+      topic: room.topic,
       players: room.players.map((p) => ({
         id: p.id,
         nickname: p.nickname,

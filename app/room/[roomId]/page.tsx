@@ -18,6 +18,8 @@ import GameOverModal from '@/components/GameOverModal';
 import NicknameInfoModal from '@/components/NicknameInfoModal';
 import ConfirmModal from '@/components/ConfirmModal';
 import SetNicknameModal from '@/components/SetNicknameModal';
+import TopicBanner from '@/components/TopicBanner';
+import AlertModal from '@/components/AlertModal';
 import ToastStack, { type ToastItem } from '@/components/ToastStack';
 
 type JoinPhase = 'checking' | 'notJoined' | 'joined';
@@ -170,7 +172,6 @@ export default function RoomPage() {
         {!authLoading && !user && (
           <p className="text-center text-xs text-neutral-500">입장하려면 로그인이 필요해요.</p>
         )}
-        {joinError && <p className="text-center text-sm text-red-400">{joinError}</p>}
         <button
           onClick={handleJoin}
           disabled={joining}
@@ -178,6 +179,7 @@ export default function RoomPage() {
         >
           {joining ? '입장 중...' : '입장하기'}
         </button>
+        {joinError && <AlertModal title={joinError} onClose={() => setJoinError(null)} />}
       </main>
     );
   }
@@ -218,6 +220,7 @@ export default function RoomPage() {
         <div className="grid flex-1 grid-cols-1 gap-4 sm:grid-cols-[200px_1fr]">
           <PlayerSidebar room={room} viewerId={viewerId} />
           <div className="flex flex-col gap-4">
+            <TopicBanner topic={room.topic} />
             {room.phase === 'VOTING' ? (
               <VotePanel
                 candidates={room.players.filter((p) => p.isAlive)}
