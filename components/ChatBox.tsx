@@ -16,6 +16,7 @@ export default function ChatBox({
 }) {
   const [text, setText] = useState('');
   const bottomRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -27,6 +28,7 @@ export default function ChatBox({
     if (!clean || disabled) return;
     onSend(clean);
     setText('');
+    requestAnimationFrame(() => inputRef.current?.focus());
   }
 
   return (
@@ -51,16 +53,19 @@ export default function ChatBox({
       </div>
       <form onSubmit={handleSubmit} className="flex gap-2 border-t border-neutral-800 p-2">
         <input
+          ref={inputRef}
           value={text}
           onChange={(e) => setText(e.target.value)}
           disabled={disabled}
           maxLength={300}
           placeholder={disabled ? '지금은 채팅할 수 없습니다' : '메시지 입력...'}
-          className="flex-1 rounded-lg bg-neutral-800 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-emerald-500 disabled:opacity-50"
+          enterKeyHint="send"
+          className="flex-1 rounded-lg bg-neutral-800 px-3 py-2 text-base outline-none focus:ring-2 focus:ring-emerald-500 disabled:opacity-50"
         />
         <button
           type="submit"
           disabled={disabled}
+          onMouseDown={(e) => e.preventDefault()}
           className="rounded-lg bg-emerald-600 px-4 text-sm font-medium hover:bg-emerald-500 disabled:opacity-40"
         >
           전송
