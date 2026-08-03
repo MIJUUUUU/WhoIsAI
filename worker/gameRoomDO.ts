@@ -25,7 +25,7 @@ import { pickRandomTopic } from './topics';
 import { censorProfanity } from './profanity';
 
 const MIN_MAX_PLAYERS = MIN_PLAYERS_TO_START;
-const MAX_MAX_PLAYERS = 10;
+const MAX_MAX_PLAYERS = 6;
 const DISCONNECT_GRACE_MS = 30000;
 const DISCUSSION_MS_DEFAULT = 3 * 60 * 1000;
 const VOTING_MS_DEFAULT = 30 * 1000;

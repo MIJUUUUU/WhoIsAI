@@ -57,11 +57,11 @@ export default function CreateRoomModal({ onClose }: { onClose: () => void }) {
           {nameError && <p className="mt-1 text-xs text-red-400">{nameError}</p>}
         </div>
         <div className="flex items-center justify-between">
-          <label className="text-sm text-neutral-400">최대 인원 (4~10)</label>
+          <label className="text-sm text-neutral-400">최대 인원 (2~6)</label>
           <input
             type="number"
-            min={4}
-            max={10}
+            min={2}
+            max={6}
             value={maxPlayers}
             onChange={(e) => setMaxPlayers(Number(e.target.value))}
             className="w-20 rounded-lg bg-neutral-800 px-3 py-2 text-right outline-none focus:ring-2 focus:ring-emerald-500"

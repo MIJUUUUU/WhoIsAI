@@ -16,7 +16,7 @@ export interface Env {
 }
 
 // 서버(GameRoomDO)와 클라이언트(대기실 UI) 둘 다에서 쓰는 공유 상수라 여기 둔다 (cloudflare:workers 의존성 없음).
-export const MIN_PLAYERS_TO_START = 3;
+export const MIN_PLAYERS_TO_START = 2;
 
 export type GamePhase = 'LOBBY' | 'DISCUSSION' | 'VOTING' | 'ROUND_RESULT' | 'GAME_OVER';
 
