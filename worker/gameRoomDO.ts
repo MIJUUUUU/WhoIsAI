@@ -314,11 +314,9 @@ export class GameRoomDO extends DurableObject<Env> {
     this.broadcastState();
 
     if (this.room.phase === 'LOBBY') {
-      // 대기실에서 혼자 있는 상태로 끊기면(백그라운드 탭 스로틀링, 일시적 네트워크 문제 등) 방을
-      // 통째로 없애지 않는다 — 금방 재접속해서 돌아올 수도 있고, 어차피 다른 사람이 없어서
-      // 유령 상태로 남아있어도 헷갈릴 사람이 없다. 정말 안 돌아오면 그냥 방치될 뿐 피해가 없다.
-      const humanCount = this.room.players.filter((p) => !p.isAI).length;
-      if (humanCount > 1) await this.removePlayer(playerId);
+      // 대기실에서는 연결이 끊긴 플레이어를 바로 제거한다. 특히 방장이 방을 만든 직후
+      // 나가면 혼자 남은 빈 방이 공개 로비에 계속 남지 않아야 한다.
+      await this.removePlayer(playerId);
     } else {
       await this.enqueueEvent({
         id: crypto.randomUUID(),
