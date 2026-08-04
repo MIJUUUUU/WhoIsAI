@@ -390,9 +390,8 @@ export class GameRoomDO extends DurableObject<Env> {
         const reactive = !mentioned && shouldTriggerReactiveReply(this.room, message, now);
         if (mentioned || reactive) {
           ai.lastReactiveReplyAt = now;
-          // 실제 OpenAI 호출 시간(1~2초 안팎)까지 더해지면 너무 느려 보여서, 예약 딜레이 자체는
-          // 짧게 잡는다 (그래도 0초는 아니게 살짝의 "생각하는 텀"만 남긴다).
-          const delay = mentioned ? 500 + Math.random() * 1000 : 800 + Math.random() * 1500;
+          // 질문/멘션은 사람이 잠깐 읽고 답을 생각하는 텀처럼 약 2초 뒤에 반응한다.
+          const delay = mentioned ? 1800 + Math.random() * 700 : 1400 + Math.random() * 1200;
           await this.enqueueEvent({ id: crypto.randomUUID(), type: 'AI_REACTIVE_REPLY', dueAt: now + delay });
         }
       }
@@ -687,10 +686,14 @@ export class GameRoomDO extends DurableObject<Env> {
     if (!text || this.room.phase !== 'DISCUSSION') return;
 
     ai.lastMessageAt = Date.now();
-    const message: ChatMessage = { id: crypto.randomUUID(), playerId: ai.id, nickname: ai.nickname, text, ts: Date.now() };
-    this.room.chatLog.push(message);
+    const messages = text.split('\n').map((line) => line.trim()).filter(Boolean).slice(0, 2);
+    for (const [index, messageText] of messages.entries()) {
+      if (index > 0) await new Promise((resolve) => setTimeout(resolve, 450 + Math.random() * 500));
+      const message: ChatMessage = { id: crypto.randomUUID(), playerId: ai.id, nickname: ai.nickname, text: messageText, ts: Date.now() };
+      this.room.chatLog.push(message);
+      this.broadcast({ type: 'chat:new', payload: message });
+    }
     await this.persist();
-    this.broadcast({ type: 'chat:new', payload: message });
   }
 
   private async removePlayer(playerId: string) {
