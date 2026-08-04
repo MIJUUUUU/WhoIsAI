@@ -3,6 +3,15 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import type { ChatMessage } from '@/types/game';
 
+function formatTime(ts: number) {
+  const d = new Date(ts);
+  const hours = d.getHours();
+  const period = hours < 12 ? '오전' : '오후';
+  const displayHour = hours % 12 === 0 ? 12 : hours % 12;
+  const minutes = d.getMinutes().toString().padStart(2, '0');
+  return `${period} ${displayHour}:${minutes}`;
+}
+
 export default function ChatBox({
   messages,
   viewerId,
@@ -40,13 +49,22 @@ export default function ChatBox({
         {messages.map((m) => (
           <div key={m.id} className={m.playerId === viewerId ? 'text-right' : ''}>
             <span className="block text-xs text-neutral-500">{m.nickname}</span>
-            <p
-              className={`inline-block max-w-[80%] break-words rounded-lg px-3 py-1.5 text-sm ${
-                m.playerId === viewerId ? 'bg-emerald-700' : 'bg-neutral-800'
+            <div
+              className={`flex items-end gap-1 ${
+                m.playerId === viewerId ? 'flex-row-reverse' : ''
               }`}
             >
-              {m.text}
-            </p>
+              <p
+                className={`inline-block max-w-[80%] break-words rounded-lg px-3 py-1.5 text-sm ${
+                  m.playerId === viewerId ? 'bg-emerald-700' : 'bg-neutral-800'
+                }`}
+              >
+                {m.text}
+              </p>
+              <span className="mb-0.5 shrink-0 text-[10px] text-neutral-600">
+                {formatTime(m.ts)}
+              </span>
+            </div>
           </div>
         ))}
         <div ref={bottomRef} />
@@ -66,6 +84,7 @@ export default function ChatBox({
           type="submit"
           disabled={disabled}
           onMouseDown={(e) => e.preventDefault()}
+          onTouchStart={(e) => e.preventDefault()}
           className="rounded-lg bg-emerald-600 px-4 text-sm font-medium hover:bg-emerald-500 disabled:opacity-40"
         >
           전송
