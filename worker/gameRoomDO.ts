@@ -208,6 +208,7 @@ export class GameRoomDO extends DurableObject<Env> {
     if (!this.room) return;
     await this.checkOverdueTransitions();
     await this.checkStaleConnections();
+    await this.checkOverdueAiEvents();
     if (!this.room) return;
 
     let msg: ClientMessage;
@@ -389,7 +390,9 @@ export class GameRoomDO extends DurableObject<Env> {
         const reactive = !mentioned && shouldTriggerReactiveReply(this.room, message, now);
         if (mentioned || reactive) {
           ai.lastReactiveReplyAt = now;
-          const delay = mentioned ? 2000 + Math.random() * 3000 : 3000 + Math.random() * 4000;
+          // 실제 OpenAI 호출 시간(1~2초 안팎)까지 더해지면 너무 느려 보여서, 예약 딜레이 자체는
+          // 짧게 잡는다 (그래도 0초는 아니게 살짝의 "생각하는 텀"만 남긴다).
+          const delay = mentioned ? 500 + Math.random() * 1000 : 800 + Math.random() * 1500;
           await this.enqueueEvent({ id: crypto.randomUUID(), type: 'AI_REACTIVE_REPLY', dueAt: now + delay });
         }
       }
@@ -791,6 +794,24 @@ export class GameRoomDO extends DurableObject<Env> {
     if (this.room.phase === 'DISCUSSION') await this.startVotingPhase();
     else if (this.room.phase === 'VOTING') await this.tallyVotes();
     else if (this.room.phase === 'ROUND_RESULT') await this.checkWinCondition();
+  }
+
+  // AI 반응형 발화는 몇 초 안에 와야 자연스러운데, 알람이 예정보다 몇 초~수십 초 늦게 실제로
+  // 발동하는 경우가 관찰돼서(로컬뿐 아니라 배포 환경에서도), 다른 플레이어의 메시지/ping이 들어올
+  // 때마다 마감 지난 AI 이벤트가 있으면 알람을 기다리지 않고 바로 처리한다.
+  private async checkOverdueAiEvents() {
+    if (!this.room || this.room.phase !== 'DISCUSSION') return;
+    const now = Date.now();
+    const due = this.events.filter(
+      (e) => (e.type === 'AI_MESSAGE' || e.type === 'AI_REACTIVE_REPLY') && e.dueAt <= now
+    );
+    if (due.length === 0) return;
+    this.events = this.events.filter((e) => !due.includes(e));
+    for (const event of due) {
+      if (!this.room || this.room.phase !== 'DISCUSSION') break;
+      await this.emitAiMessage(event.type === 'AI_REACTIVE_REPLY');
+    }
+    await this.persist();
   }
 
   private alivePlayers(): Player[] {
