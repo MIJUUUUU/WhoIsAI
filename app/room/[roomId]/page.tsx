@@ -236,7 +236,7 @@ export default function RoomPage() {
         >
           {joining ? '입장 중...' : '입장하기'}
         </button>
-        {joinError && <AlertModal title={joinError} onClose={() => setJoinError(null)} />}
+        {joinError && <AlertModal title={joinError} onClose={() => router.push('/')} />}
       </main>
     );
   }
