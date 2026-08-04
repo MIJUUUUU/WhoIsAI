@@ -30,7 +30,7 @@ export default function SetNicknameModal({
           onChange={(e) => setValue(e.target.value)}
           maxLength={12}
           autoFocus
-          className="w-full rounded-lg bg-neutral-800 px-3 py-2 text-center outline-none focus:ring-2 focus:ring-emerald-500"
+          className="w-full rounded-lg bg-neutral-800 px-3 py-2 text-center text-base outline-none focus:ring-2 focus:ring-emerald-500"
         />
         <button
           type="submit"

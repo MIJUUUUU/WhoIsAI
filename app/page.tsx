@@ -119,7 +119,7 @@ export default function LobbyPage() {
           onChange={(e) => setCodeInput(e.target.value)}
           placeholder="초대 코드로 입장"
           maxLength={6}
-          className="flex-1 rounded-lg border border-neutral-800 bg-neutral-900 px-3 py-2 uppercase tracking-widest outline-none focus:ring-2 focus:ring-emerald-500"
+          className="flex-1 rounded-lg border border-neutral-800 bg-neutral-900 px-3 py-2 text-base uppercase tracking-widest outline-none focus:ring-2 focus:ring-emerald-500"
         />
         <button
           type="submit"

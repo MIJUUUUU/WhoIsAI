@@ -10,7 +10,9 @@ export default function CreateRoomModal({ onClose }: { onClose: () => void }) {
   const router = useRouter();
   const [name, setName] = useState("");
   const [isPublic, setIsPublic] = useState(true);
-  const [maxPlayers, setMaxPlayers] = useState(6);
+  // 숫자(number) state로 직접 바인딩하면 지웠을 때 Number('')===0이 되어 "0"이 찍히고,
+  // 그 뒤에 이어 입력하면 "04"처럼 앞에 0이 남는 문제가 있어서 문자열로 관리하고 제출 시에만 파싱한다.
+  const [maxPlayersInput, setMaxPlayersInput] = useState("6");
   const [nameError, setNameError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -24,6 +26,7 @@ export default function CreateRoomModal({ onClose }: { onClose: () => void }) {
     setNameError(null);
     setLoading(true);
     setError(null);
+    const maxPlayers = Math.min(6, Math.max(2, Number(maxPlayersInput) || 6));
     const res = await createRoom({ name, isPublic, maxPlayers });
     setLoading(false);
     if (!res.ok || !res.roomId || !res.playerId || !res.nickname) {
@@ -52,20 +55,41 @@ export default function CreateRoomModal({ onClose }: { onClose: () => void }) {
             }}
             maxLength={30}
             placeholder="예: 심심해서 만든 방"
-            className="w-full rounded-lg bg-neutral-800 px-3 py-2 outline-none focus:ring-2 focus:ring-emerald-500"
+            className="w-full rounded-lg bg-neutral-800 px-3 py-2 text-base outline-none focus:ring-2 focus:ring-emerald-500"
           />
           {nameError && <p className="mt-1 text-xs text-red-400">{nameError}</p>}
         </div>
         <div className="flex items-center justify-between">
           <label className="text-sm text-neutral-400">최대 인원 (2~6)</label>
-          <input
-            type="number"
-            min={2}
-            max={6}
-            value={maxPlayers}
-            onChange={(e) => setMaxPlayers(Number(e.target.value))}
-            className="w-20 rounded-lg bg-neutral-800 px-3 py-2 text-right outline-none focus:ring-2 focus:ring-emerald-500"
-          />
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() =>
+                setMaxPlayersInput(String(Math.max(2, (Number(maxPlayersInput) || 2) - 1)))
+              }
+              className="h-9 w-9 rounded-lg bg-neutral-800 text-lg hover:bg-neutral-700"
+            >
+              −
+            </button>
+            <input
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              value={maxPlayersInput}
+              onChange={(e) => setMaxPlayersInput(e.target.value.replace(/[^0-9]/g, "").slice(0, 1))}
+              onBlur={() => setMaxPlayersInput(String(Math.min(6, Math.max(2, Number(maxPlayersInput) || 6))))}
+              className="w-12 rounded-lg bg-neutral-800 px-2 py-2 text-center text-base outline-none focus:ring-2 focus:ring-emerald-500"
+            />
+            <button
+              type="button"
+              onClick={() =>
+                setMaxPlayersInput(String(Math.min(6, (Number(maxPlayersInput) || 6) + 1)))
+              }
+              className="h-9 w-9 rounded-lg bg-neutral-800 text-lg hover:bg-neutral-700"
+            >
+              +
+            </button>
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <input
