@@ -24,12 +24,33 @@ export default function ChatBox({
   onSend: (text: string) => void;
 }) {
   const [text, setText] = useState('');
+  const [hasNewMessages, setHasNewMessages] = useState(false);
+  const isNearBottomRef = useRef(true);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (isNearBottomRef.current) {
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    } else {
+      window.setTimeout(() => setHasNewMessages(true), 0);
+    }
   }, [messages.length]);
+
+  function handleScroll() {
+    const container = scrollRef.current;
+    if (!container) return;
+    const nearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 48;
+    isNearBottomRef.current = nearBottom;
+    if (nearBottom) setHasNewMessages(false);
+  }
+
+  function scrollToLatest() {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    isNearBottomRef.current = true;
+    setHasNewMessages(false);
+  }
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -42,7 +63,12 @@ export default function ChatBox({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col rounded-xl border border-neutral-800 bg-neutral-900">
-      <div className="thin-scrollbar min-h-[180px] flex-1 space-y-2 overflow-y-auto p-3 sm:min-h-[220px]" style={{ maxHeight: 360 }}>
+      <div
+        ref={scrollRef}
+        onScroll={handleScroll}
+        className="thin-scrollbar relative min-h-[180px] flex-1 space-y-2 overflow-y-auto p-3 sm:min-h-[220px]"
+        style={{ maxHeight: 360 }}
+      >
         {messages.length === 0 && (
           <p className="py-8 text-center text-sm text-neutral-600">아직 대화가 없어요. 먼저 말을 걸어보세요.</p>
         )}
@@ -68,6 +94,15 @@ export default function ChatBox({
           </div>
         ))}
         <div ref={bottomRef} />
+        {hasNewMessages && (
+          <button
+            type="button"
+            onClick={scrollToLatest}
+            className="sticky bottom-1 left-1/2 z-10 -translate-x-1/2 rounded-full bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white shadow-lg hover:bg-emerald-500"
+          >
+            새 메시지
+          </button>
+        )}
       </div>
       <form onSubmit={handleSubmit} className="flex gap-2 border-t border-neutral-800 p-2">
         <input

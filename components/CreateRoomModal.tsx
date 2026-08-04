@@ -42,13 +42,14 @@ export default function CreateRoomModal({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <Modal onClose={onClose}>
+    <Modal onClose={loading ? () => {} : onClose}>
       <h2 className="mb-4 text-lg font-semibold">방 만들기</h2>
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <label className="mb-1 block text-sm text-neutral-400">방 이름</label>
-          <input
-            value={name}
+            <input
+              value={name}
+              disabled={loading}
             onChange={(e) => {
               setName(e.target.value);
               if (nameError) setNameError(null);
@@ -64,6 +65,7 @@ export default function CreateRoomModal({ onClose }: { onClose: () => void }) {
           <div className="flex items-center gap-1">
             <button
               type="button"
+              disabled={loading}
               onClick={() =>
                 setMaxPlayersInput(String(Math.max(2, (Number(maxPlayersInput) || 2) - 1)))
               }
@@ -73,6 +75,7 @@ export default function CreateRoomModal({ onClose }: { onClose: () => void }) {
             </button>
             <input
               type="text"
+              disabled={loading}
               inputMode="numeric"
               pattern="[0-9]*"
               value={maxPlayersInput}
@@ -82,6 +85,7 @@ export default function CreateRoomModal({ onClose }: { onClose: () => void }) {
             />
             <button
               type="button"
+              disabled={loading}
               onClick={() =>
                 setMaxPlayersInput(String(Math.min(6, (Number(maxPlayersInput) || 6) + 1)))
               }
@@ -95,6 +99,7 @@ export default function CreateRoomModal({ onClose }: { onClose: () => void }) {
           <input
             id="isPublic"
             type="checkbox"
+            disabled={loading}
             checked={isPublic}
             onChange={(e) => setIsPublic(e.target.checked)}
           />
@@ -107,6 +112,7 @@ export default function CreateRoomModal({ onClose }: { onClose: () => void }) {
           <button
             type="button"
             onClick={onClose}
+            disabled={loading}
             className="flex-1 rounded-lg bg-neutral-800 py-2 hover:bg-neutral-700"
           >
             취소
@@ -114,9 +120,10 @@ export default function CreateRoomModal({ onClose }: { onClose: () => void }) {
           <button
             type="submit"
             disabled={loading}
+            aria-busy={loading}
             className="flex-1 rounded-lg bg-emerald-600 py-2 font-medium hover:bg-emerald-500 disabled:opacity-50"
           >
-            {loading ? "생성 중..." : "만들기"}
+            {loading ? "방 만드는 중..." : "만들기"}
           </button>
         </div>
       </form>

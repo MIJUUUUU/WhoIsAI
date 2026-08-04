@@ -18,6 +18,7 @@ import {
   shouldTriggerMentionReply,
   shouldTriggerReactiveReply,
   pickAiPersona,
+  normalizeAiMessage,
   type ReactingTo,
 } from './aiPlayer';
 import { verifyAppwriteJwt, recordGameResult, assignPersistentNickname, type AppwriteIdentity } from './appwrite';
@@ -30,7 +31,8 @@ const DISCONNECT_GRACE_MS = 30000;
 const DISCUSSION_MS_DEFAULT = 3 * 60 * 1000;
 const VOTING_MS_DEFAULT = 30 * 1000;
 const ROUND_RESULT_MS_DEFAULT = 6 * 1000;
-const MAX_ROUNDS_DEFAULT = 5;
+const MAX_ROUNDS_DEFAULT = 2;
+const SHORT_DISCUSSION_MS = 90 * 1000;
 const CHAT_SPAM_WINDOW_MS = 10 * 1000;
 const CHAT_SPAM_LIMIT = 10;
 const CHAT_MUTE_MS = 30 * 1000;
@@ -67,7 +69,9 @@ export class GameRoomDO extends DurableObject<Env> {
     return Number(this.env.ROUND_RESULT_MS) || ROUND_RESULT_MS_DEFAULT;
   }
   private get maxRounds() {
-    return Number(this.env.MAX_ROUNDS) || MAX_ROUNDS_DEFAULT;
+    if (!this.room) return MAX_ROUNDS_DEFAULT;
+    const humanCount = this.room.players.filter((p) => !p.isAI).length;
+    return humanCount >= 5 ? 2 : 1;
   }
 
   // ---------------- RPC (HTTP 라우트에서 호출) ----------------
@@ -82,7 +86,13 @@ export class GameRoomDO extends DurableObject<Env> {
       Math.max(MIN_MAX_PLAYERS, Number(input.maxPlayers) || MIN_MAX_PLAYERS)
     );
     const hostId = crypto.randomUUID();
-    const nickname = await this.resolveNickname(identity, []);
+    // 방 생성 응답을 막지 않도록, 첫 닉네임의 Appwrite 저장은 백그라운드에서 처리한다.
+    const nickname = await this.resolveNickname(identity, [], false);
+    if (!identity.nickname) {
+      void assignPersistentNickname(this.env, identity.id, nickname).catch((err) =>
+        console.error('[gameRoom] 닉네임 백그라운드 저장 실패:', (err as Error).message)
+      );
+    }
     const hostPlayer: Player = {
       id: hostId,
       nickname,
@@ -120,7 +130,12 @@ export class GameRoomDO extends DurableObject<Env> {
     };
     this.events = [];
     await this.persist();
-    await this.syncLobby();
+    // 방 데이터 저장은 완료한 뒤 응답하지만, 공개방 목록 반영은 응답을 기다리지 않는다.
+    if (this.room.isPublic) {
+      void this.syncLobby().catch((err) =>
+        console.error('[gameRoom] 로비 백그라운드 동기화 실패:', (err as Error).message)
+      );
+    }
     return { playerId: hostId, nickname, room: this.serializeRoom() };
   }
 
@@ -150,6 +165,13 @@ export class GameRoomDO extends DurableObject<Env> {
     const humanCount = this.room.players.filter((p) => !p.isAI).length;
     if (humanCount >= this.room.maxPlayers) return { error: '방 인원이 가득 찼습니다.' };
 
+    // 저장된 닉네임을 다른 사람의 닉네임으로 몰래 바꾸지 않는다.
+    // 같은 계정의 기존 플레이어는 위에서 먼저 돌려주므로, 여기서 걸리는 경우는
+    // 다른 계정이 같은 닉네임으로 이미 참가한 경우뿐이다.
+    if (identity.nickname && this.room.players.some((p) => p.nickname === identity.nickname)) {
+      return { error: '이미 존재하는 닉네임입니다. 다른 닉네임을 사용해주세요.' };
+    }
+
     const playerId = crypto.randomUUID();
     const nickname = await this.resolveNickname(
       identity,
@@ -177,12 +199,16 @@ export class GameRoomDO extends DurableObject<Env> {
 
   // 로그인된 유저는 계정에 고정된 닉네임을 재사용한다 (처음이면 새로 배정해서 계정에 저장).
   // 이 방 안에서 이미 쓰이고 있는 이름과 겹치면(드문 경우) 이번 판에 한해서만 새로 뽑는다.
-  private async resolveNickname(identity: AppwriteIdentity | null, taken: string[]): Promise<string> {
+  private async resolveNickname(
+    identity: AppwriteIdentity | null,
+    taken: string[],
+    persist = true
+  ): Promise<string> {
     if (!identity) return generateRandomNickname(taken);
     if (identity.nickname && !taken.includes(identity.nickname)) return identity.nickname;
 
     const fresh = generateRandomNickname(taken);
-    if (!identity.nickname) {
+    if (!identity.nickname && persist) {
       await assignPersistentNickname(this.env, identity.id, fresh);
     }
     return fresh;
@@ -389,6 +415,8 @@ export class GameRoomDO extends DurableObject<Env> {
         // 직접 언급된 게 아니라면, 확률적으로 대화에 자연스럽게 끼어들어 반응한다(타이머로만 말하는 티 방지).
         const reactive = !mentioned && shouldTriggerReactiveReply(this.room, message, now);
         if (mentioned || reactive) {
+          const hasPendingReactiveReply = this.events.some((event) => event.type === 'AI_REACTIVE_REPLY');
+          if (hasPendingReactiveReply) return;
           ai.lastReactiveReplyAt = now;
           // 질문/멘션은 사람이 잠깐 읽고 답을 생각하는 텀처럼 약 2초 뒤에 반응한다.
           const delay = mentioned ? 1800 + Math.random() * 700 : 1400 + Math.random() * 1200;
@@ -542,15 +570,16 @@ export class GameRoomDO extends DurableObject<Env> {
 
   private async startDiscussionPhase() {
     if (!this.room) return;
+    const discussionMs = this.room.round >= 1 ? Math.min(this.discussionMs, SHORT_DISCUSSION_MS) : this.discussionMs;
     this.room.phase = 'DISCUSSION';
-    this.room.phaseEndsAt = Date.now() + this.discussionMs;
+    this.room.phaseEndsAt = Date.now() + discussionMs;
     this.room.votes = {};
     // 매 라운드 새 주제를 뽑는다 (라운드가 넘어가도 이전 주제 그대로 남아있던 문제 수정).
     this.room.topic = pickRandomTopic();
     await this.persist();
     this.broadcastState();
 
-    for (const offset of randomMessageOffsets(this.discussionMs)) {
+    for (const offset of randomMessageOffsets(discussionMs)) {
       await this.enqueueEvent({ id: crypto.randomUUID(), type: 'AI_MESSAGE', dueAt: Date.now() + offset });
     }
     await this.enqueueEvent({ id: crypto.randomUUID(), type: 'DISCUSSION_END', dueAt: this.room.phaseEndsAt });
@@ -686,7 +715,11 @@ export class GameRoomDO extends DurableObject<Env> {
     if (!text || this.room.phase !== 'DISCUSSION') return;
 
     ai.lastMessageAt = Date.now();
-    const messages = text.split('\n').map((line) => line.trim()).filter(Boolean).slice(0, 2);
+    const messages = text
+      .split('\n')
+      .map((line) => normalizeAiMessage(line))
+      .filter(Boolean)
+      .slice(0, 2);
     for (const [index, messageText] of messages.entries()) {
       if (index > 0) await new Promise((resolve) => setTimeout(resolve, 450 + Math.random() * 500));
       const message: ChatMessage = { id: crypto.randomUUID(), playerId: ai.id, nickname: ai.nickname, text: messageText, ts: Date.now() };
