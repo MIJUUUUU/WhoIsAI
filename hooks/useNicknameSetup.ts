@@ -12,9 +12,10 @@ export function useNicknameSetup(user: Models.User<Models.Preferences> | null, a
 
   const needsNickname = !authLoading && !!user && !(user.prefs as { nickname?: string }).nickname;
 
-  async function handleSetNickname(nickname: string) {
+  async function handleSetNickname(nickname: string): Promise<void> {
     await setPersistentNickname(nickname);
     await refresh();
+    window.dispatchEvent(new CustomEvent('nickname:updated', { detail: { nickname } }));
   }
 
   return { needsNickname, nicknameSuggestion, handleSetNickname };

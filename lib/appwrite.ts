@@ -44,5 +44,12 @@ export async function getGameJwt(): Promise<string | null> {
 
 // 대기실에서 보일 닉네임을 계정에 저장 (본인 계정이라 서버 없이 클라이언트에서 직접 가능).
 export async function setPersistentNickname(nickname: string): Promise<void> {
-  await account.updatePrefs({ prefs: { nickname } });
+  const { jwt } = await account.createJWT();
+  const res = await fetch('/api/nickname', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jwt, nickname }),
+  });
+  const data = (await res.json()) as { error?: string };
+  if (!res.ok) throw new Error(data.error || '닉네임 저장에 실패했습니다.');
 }

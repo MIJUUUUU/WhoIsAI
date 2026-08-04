@@ -1,9 +1,18 @@
 'use client';
 
+import { useEffect } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 
 export default function AuthStatus() {
-  const { user, loading, login, logout } = useAuth();
+  const { user, loading, login, logout, refresh } = useAuth();
+
+  useEffect(() => {
+    const handleNicknameUpdated = () => {
+      void refresh();
+    };
+    window.addEventListener('nickname:updated', handleNicknameUpdated);
+    return () => window.removeEventListener('nickname:updated', handleNicknameUpdated);
+  }, [refresh]);
 
   if (loading) return <div className="h-8" />;
 
