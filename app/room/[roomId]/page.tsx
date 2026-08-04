@@ -293,7 +293,7 @@ export default function RoomPage() {
       ) : (
         <div className="grid flex-1 grid-cols-1 gap-4 sm:grid-cols-[200px_1fr]">
           <PlayerSidebar room={room} viewerId={viewerId} />
-          <div className="flex flex-col gap-4">
+          <div className="flex min-h-0 flex-col gap-4">
             <TopicBanner topic={room.topic} />
             {room.phase === 'VOTING' ? (
               <VotePanel

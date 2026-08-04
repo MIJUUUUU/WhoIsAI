@@ -41,8 +41,8 @@ export default function ChatBox({
   }
 
   return (
-    <div className="flex flex-1 flex-col rounded-xl border border-neutral-800 bg-neutral-900">
-      <div className="thin-scrollbar flex-1 space-y-2 overflow-y-auto p-3" style={{ minHeight: 320, maxHeight: 420 }}>
+    <div className="flex min-h-0 flex-1 flex-col rounded-xl border border-neutral-800 bg-neutral-900">
+      <div className="thin-scrollbar min-h-[180px] flex-1 space-y-2 overflow-y-auto p-3 sm:min-h-[220px]" style={{ maxHeight: 360 }}>
         {messages.length === 0 && (
           <p className="py-8 text-center text-sm text-neutral-600">아직 대화가 없어요. 먼저 말을 걸어보세요.</p>
         )}
