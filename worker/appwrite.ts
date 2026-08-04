@@ -61,6 +61,35 @@ function statsBase(env: Env): string | null {
   return `${env.APPWRITE_ENDPOINT}/tablesdb/${env.APPWRITE_DATABASE_ID}/tables/${env.APPWRITE_STATS_TABLE_ID}`;
 }
 
+function nicknamesBase(env: Env): string | null {
+  if (!env.APPWRITE_ENDPOINT || !env.APPWRITE_DATABASE_ID || !env.APPWRITE_NICKNAMES_TABLE_ID) return null;
+  return `${env.APPWRITE_ENDPOINT}/tablesdb/${env.APPWRITE_DATABASE_ID}/tables/${env.APPWRITE_NICKNAMES_TABLE_ID}`;
+}
+
+export async function claimNickname(env: Env, userId: string, nickname: string): Promise<{ ok: boolean; error?: string }> {
+  const base = nicknamesBase(env);
+  if (!base) return { ok: false, error: '닉네임 저장 설정이 되어 있지 않습니다.' };
+  try {
+    const query = encodeURIComponent(JSON.stringify({ method: 'equal', attribute: 'nickname', values: [nickname] }));
+    const existingRes = await fetch(`${base}/rows?queries[]=${query}`, { headers: serverHeaders(env) });
+    if (!existingRes.ok) return { ok: false, error: '닉네임을 확인할 수 없습니다.' };
+    const existing = (await existingRes.json()) as { rows?: Array<{ $id?: string; userId?: string }>; documents?: Array<{ $id?: string; userId?: string }> };
+    const rows = existing.rows ?? existing.documents ?? [];
+    if (rows.some((row) => row.userId !== userId)) return { ok: false, error: '이미 존재하는 닉네임입니다.' };
+    if (rows.length > 0) return { ok: true };
+    const createRes = await fetch(`${base}/rows`, {
+      method: 'POST', headers: serverHeaders(env),
+      body: JSON.stringify({ rowId: userId, data: { nickname, userId }, permissions: ['read("any")'] }),
+    });
+    if (createRes.status === 409) return { ok: false, error: '이미 존재하는 닉네임입니다.' };
+    if (!createRes.ok) return { ok: false, error: '닉네임 저장에 실패했습니다.' };
+    return { ok: true };
+  } catch (err) {
+    console.error('[appwrite] 닉네임 예약 실패:', (err as Error).message);
+    return { ok: false, error: '닉네임을 확인할 수 없습니다.' };
+  }
+}
+
 function serverHeaders(env: Env): Record<string, string> {
   return {
     'X-Appwrite-Project': env.APPWRITE_PROJECT_ID,

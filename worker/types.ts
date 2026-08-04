@@ -12,6 +12,7 @@ export interface Env {
   APPWRITE_PROJECT_ID: string;
   APPWRITE_DATABASE_ID: string;
   APPWRITE_STATS_TABLE_ID: string;
+  APPWRITE_NICKNAMES_TABLE_ID?: string;
   APPWRITE_API_KEY: string;
 }
 

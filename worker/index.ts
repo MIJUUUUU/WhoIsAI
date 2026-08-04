@@ -3,7 +3,7 @@ import { default as nextHandler } from '../.open-next/worker.js';
 import type { Env } from './types';
 import { GameRoomDO } from './gameRoomDO';
 import { LobbyRegistryDO } from './lobbyRegistryDO';
-import { fetchLeaderboard } from './appwrite';
+import { claimNickname, fetchLeaderboard, verifyAppwriteJwt, assignPersistentNickname } from './appwrite';
 
 export { GameRoomDO, LobbyRegistryDO };
 
@@ -57,6 +57,18 @@ export default {
     if (pathname === '/api/leaderboard' && request.method === 'GET') {
       const rows = await fetchLeaderboard(env);
       return json(rows);
+    }
+
+    if (pathname === '/api/nickname' && request.method === 'POST') {
+      const body = await readJson(request);
+      const identity = typeof body.jwt === 'string' ? await verifyAppwriteJwt(env, body.jwt) : null;
+      const nickname = typeof body.nickname === 'string' ? body.nickname.trim().slice(0, 12) : '';
+      if (!identity) return json({ ok: false, error: '로그인 후 이용할 수 있습니다.' }, 401);
+      if (!nickname) return json({ ok: false, error: '닉네임을 입력해주세요.' }, 400);
+      const claimed = await claimNickname(env, identity.id, nickname);
+      if (!claimed.ok) return json(claimed, 409);
+      await assignPersistentNickname(env, identity.id, nickname);
+      return json({ ok: true });
     }
 
     if (pathname === '/api/rooms' && request.method === 'POST') {
