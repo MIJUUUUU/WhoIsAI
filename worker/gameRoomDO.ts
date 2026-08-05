@@ -416,8 +416,8 @@ export class GameRoomDO extends DurableObject<Env> {
           const hasPendingReactiveReply = this.events.some((event) => event.type === 'AI_REACTIVE_REPLY');
           if (hasPendingReactiveReply) return;
           ai.lastReactiveReplyAt = now;
-          // 질문/멘션은 사람이 잠깐 읽고 답을 생각하는 텀처럼 약 2초 뒤에 반응한다.
-          const delay = mentioned ? 1800 + Math.random() * 700 : 1400 + Math.random() * 1200;
+          // 답변 텀을 고정하지 않고, 사람이 읽고 생각하는 것처럼 3~6초 사이에서 랜덤하게 둔다.
+          const delay = 3000 + Math.random() * 3000;
           await this.enqueueEvent({ id: crypto.randomUUID(), type: 'AI_REACTIVE_REPLY', dueAt: now + delay });
         }
       }
