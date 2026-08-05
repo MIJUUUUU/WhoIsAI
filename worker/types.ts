@@ -33,6 +33,8 @@ export interface Player {
   // 마지막으로 뭐든(hello/ping/채팅/투표 등) 메시지를 보낸 시각. 소켓이 정상 종료 신호 없이
   // 그냥 조용히 죽었을 때(노트북 잠자기, 네트워크 끊김 등)를 감지하는 데 쓴다.
   lastSeenAt: number | null;
+  // 같은 계정의 새 기기 접속이 기존 연결을 교체했는지 구분하는 토큰.
+  connectionToken?: string;
   // AI가 직접 언급되거나(mention) 대화에 반응해서 끼어들 때(reactive) 공유하는 쿨다운 기준 시각.
   lastReactiveReplyAt: number | null;
   // AI가 실제로 마지막 메시지를 보낸 시각(AI 전용). 스케줄 발화와 반응형 발화가 우연히 겹쳐서
@@ -175,7 +177,8 @@ export type ServerMessage =
   | { type: 'kicked'; payload: { reason: string } }
   | { type: 'chat:muted'; payload: { mutedUntil: number } }
   | { type: 'chat:warning'; payload: { count: number; limit: number } }
-  | { type: 'error'; payload: { message: string } };
+  | { type: 'error'; payload: { message: string } }
+  | { type: 'session:replaced'; payload: { message: string } };
 
 // 클라이언트 -> 서버 WebSocket 메시지 봉투
 export type ClientMessage =

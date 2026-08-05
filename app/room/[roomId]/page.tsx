@@ -117,6 +117,10 @@ export default function RoomPage() {
       clearSession(roomId);
       router.push(`/?notice=${encodeURIComponent(payload.reason)}`);
     },
+    'session:replaced': (payload) => {
+      clearSession(roomId);
+      router.push(`/?notice=${encodeURIComponent(payload.message)}`);
+    },
     error: (payload) => {
       if (payload.message === '플레이어 정보를 찾을 수 없습니다.' && receivedStateRef.current) {
         // 이미 방에 있었는데 재접속 시 서버가 나를 제거한 상태(유예 만료, 연결 끊김 자동 감지 등)로

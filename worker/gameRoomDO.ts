@@ -251,7 +251,25 @@ export class GameRoomDO extends DurableObject<Env> {
         this.sendError(ws, '플레이어 정보를 찾을 수 없습니다.');
         return;
       }
-      ws.serializeAttachment({ playerId: player.id });
+      const connectionToken = crypto.randomUUID();
+      for (const existingWs of this.ctx.getWebSockets()) {
+        if (existingWs === ws) continue;
+        const attachment = existingWs.deserializeAttachment() as { playerId?: string; connectionToken?: string } | null;
+        if (attachment?.playerId !== player.id) continue;
+        try {
+          existingWs.send(
+            JSON.stringify({
+              type: 'session:replaced',
+              payload: { message: '다른 곳에서 로그인되어 기존 연결이 종료되었습니다.' },
+            } satisfies ServerMessage)
+          );
+          existingWs.close(4001, 'session replaced');
+        } catch {
+          // 이미 끊긴 소켓은 무시
+        }
+      }
+      ws.serializeAttachment({ playerId: player.id, connectionToken });
+      player.connectionToken = connectionToken;
       player.connected = true;
       player.disconnectedAt = null;
       player.lastSeenAt = Date.now();
@@ -261,11 +279,12 @@ export class GameRoomDO extends DurableObject<Env> {
       return;
     }
 
-    const attachment = ws.deserializeAttachment() as { playerId?: string } | null;
+    const attachment = ws.deserializeAttachment() as { playerId?: string; connectionToken?: string } | null;
     const playerId = attachment?.playerId;
     if (!playerId) return;
     const player = this.room.players.find((p) => p.id === playerId);
     if (!player) return;
+    if (attachment?.connectionToken !== player.connectionToken) return;
     // ping을 포함해 뭐든 메시지가 온다는 건 소켓이 살아있다는 뜻이므로 매번 갱신한다.
     player.lastSeenAt = Date.now();
 
@@ -295,9 +314,11 @@ export class GameRoomDO extends DurableObject<Env> {
   async webSocketClose(ws: WebSocket) {
     await this.loaded;
     if (!this.room) return;
-    const attachment = ws.deserializeAttachment() as { playerId?: string } | null;
+    const attachment = ws.deserializeAttachment() as { playerId?: string; connectionToken?: string } | null;
     const playerId = attachment?.playerId;
     if (!playerId) return;
+    const player = this.room.players.find((p) => p.id === playerId);
+    if (!player || attachment?.connectionToken !== player.connectionToken) return;
     await this.markDisconnected(playerId);
   }
 
