@@ -1,16 +1,26 @@
 import { getGameJwt } from '@/lib/appwrite';
 import type { AckResponse, LobbyRoomSummary } from '@/types/game';
 
+const ROOM_REQUEST_TIMEOUT_MS = 12000;
+
 async function postJson(url: string, body: unknown): Promise<AckResponse> {
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), ROOM_REQUEST_TIMEOUT_MS);
   try {
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
+      signal: controller.signal,
     });
     return (await res.json()) as AckResponse;
-  } catch {
-    return { ok: false, error: '서버에 연결할 수 없습니다.' };
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      return { ok: false, error: '방 생성 시간이 초과되었습니다. 다시 시도해주세요.' };
+    }
+    return { ok: false, error: '서버에 연결할 수 없습니다. 다시 시도해주세요.' };
+  } finally {
+    window.clearTimeout(timeoutId);
   }
 }
 

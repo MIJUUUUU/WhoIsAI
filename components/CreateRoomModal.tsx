@@ -123,7 +123,7 @@ export default function CreateRoomModal({ onClose }: { onClose: () => void }) {
             aria-busy={loading}
             className="flex-1 rounded-lg bg-emerald-600 py-2 font-medium hover:bg-emerald-500 disabled:opacity-50"
           >
-            {loading ? "방 만드는 중..." : "만들기"}
+            {loading ? "방 만드는 중..." : error ? "다시 시도" : "만들기"}
           </button>
         </div>
       </form>

@@ -35,7 +35,11 @@ export async function getCurrentUser() {
 // 방 생성/입장 시 서버에 신원을 증명하기 위한 단기 JWT (로그인 상태가 아니면 null).
 export async function getGameJwt(): Promise<string | null> {
   try {
-    const { jwt } = await account.createJWT();
+    const jwtPromise = account.createJWT();
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      window.setTimeout(() => reject(new Error('JWT request timeout')), 10000)
+    );
+    const { jwt } = await Promise.race([jwtPromise, timeoutPromise]);
     return jwt;
   } catch {
     return null;

@@ -409,12 +409,18 @@ export class GameRoomDO extends DurableObject<Env> {
       const ai = findAiPlayer(this.room);
       if (ai) {
         const now = Date.now();
+        const hadPendingReactiveReply = this.events.some((event) => event.type === 'AI_REACTIVE_REPLY');
+        if (hadPendingReactiveReply) {
+          // 사람이 연속으로 보내면 이전 메시지에 대한 오래된 답변은 취소하고,
+          // 최신 메시지를 기준으로 다시 판단한다.
+          this.cancelEventsByType('AI_REACTIVE_REPLY');
+          ai.lastReactiveReplyAt = null;
+          await this.persist();
+        }
         const mentioned = shouldTriggerMentionReply(this.room, message, now);
         // 직접 언급된 게 아니라면, 확률적으로 대화에 자연스럽게 끼어들어 반응한다(타이머로만 말하는 티 방지).
         const reactive = !mentioned && shouldTriggerReactiveReply(this.room, message, now);
         if (mentioned || reactive) {
-          const hasPendingReactiveReply = this.events.some((event) => event.type === 'AI_REACTIVE_REPLY');
-          if (hasPendingReactiveReply) return;
           ai.lastReactiveReplyAt = now;
           // 답변 텀을 고정하지 않고, 사람이 읽고 생각하는 것처럼 3~6초 사이에서 랜덤하게 둔다.
           const delay = 3000 + Math.random() * 3000;
@@ -585,6 +591,9 @@ export class GameRoomDO extends DurableObject<Env> {
 
   private async startVotingPhase() {
     if (!this.room) return;
+    // 토론이 끝났으므로 아직 실행되지 않은 AI 답변 예약은 폐기한다.
+    this.cancelEventsByType('AI_MESSAGE');
+    this.cancelEventsByType('AI_REACTIVE_REPLY');
     this.room.phase = 'VOTING';
     this.room.phaseEndsAt = Date.now() + this.votingMs;
     this.room.votes = {};
